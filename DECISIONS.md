@@ -19,7 +19,7 @@ which is invisible with one window and wrong with two. Consolidating made the
 correct form the default, which is a better reason to share code than saving
 lines.
 
-### Hand-written `.d.mts`, and why the no-build-step promise survived it
+### Generated `.d.mts`, checked by a test — after hand-writing them first and being wrong
 
 The icon module got away with being plain JS because it is only imported from
 `scripts/`, which is outside every app's tsconfig. The window module is imported
@@ -30,19 +30,30 @@ declaration file.
   TypeScript will not read JS out of `node_modules` without also setting
   `maxNodeModuleJsDepth`. Two obscure flags in five repos to make an import
   typecheck is the kind of setting that works until someone wonders why.
-- **Rejected: generating declarations.** That is a `dist/` to rebuild after every
-  change, which is precisely the `dist-core` tax this package was shaped to
-  avoid.
-- **Taken: write the declarations by hand, as source.** `src/window/index.d.mts`,
-  pointed at by a `types` condition in the exports map. Four declarations kept in
-  step by hand is cheaper than a build, and the electron shapes are described
-  structurally so keel still has no electron dependency.
+- **First taken, then reversed: writing the declarations by hand.** It works, and
+  it is wrong. The shape then exists twice — once implicitly in the JS, once
+  explicitly in the `.d.mts` — with nothing checking that the two agree. Change a
+  signature and forget the declaration, and every TypeScript consumer gets types
+  that are confidently wrong. A silent lie is worse than the error it replaced.
+- **Taken instead: generate them from the JSDoc, commit them, and let a test fail
+  if they are stale.** `npm run types` runs `tsc` with `emitDeclarationOnly` into
+  `types/`; `npm test` regenerates into a scratch directory and compares. The
+  JSDoc is the single source of truth and drift is not possible.
 
-The honest cost: every future runtime module needs its own hand-written
-declarations, and they can drift from the implementation with nothing to catch
-it. Accepted for now because the modules are small. If keel ever grows an API
-big enough that this hurts, generating declarations is the answer and the
-no-build-step rule is the thing that should give way.
+The reason this does not reintroduce the `dist-core` tax is that **only the types
+are generated**. Consumers import `src/*.mjs` directly, so editing keel still
+changes its consumers immediately with nothing to rebuild. Forgetting to
+regenerate costs a failing test, not a stale runtime.
+
+Two details that cost a round each:
+
+- The declarations cannot live beside the source. A `main.d.mts` next to
+  `main.mjs` shadows it, and TypeScript then refuses to overwrite what it is
+  reading. Hence `declarationDir: "types"` and a `rootDir`.
+- `checkJs` is on, which immediately found a genuinely untyped parameter in the
+  module I had just written by hand. That is the argument for generation in one
+  line: the hand-written declaration had been describing something the
+  implementation did not quite say.
 
 ### Jot is the first consumer, and keel stays a devDependency there
 

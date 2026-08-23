@@ -1,0 +1,26 @@
+{
+  // Keel ships JavaScript and no build output. This config exists for two jobs
+  // that are not "compiling": checking the JSDoc is coherent, and deriving the
+  // .d.mts files that TypeScript consumers need.
+  //
+  // Declarations land NEXT TO the source and are committed, so a consumer still
+  // imports the .mjs directly and editing keel still needs no rebuild. Only the
+  // types are generated, and `npm test` fails if they are stale.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    // Emitted into their own tree, not beside the source: a .d.mts sitting next to
+    // its .mjs shadows it, and TypeScript then refuses to overwrite its own input.
+    "declarationDir": "types",
+    "rootDir": "src",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "es2022",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.mjs"]
+}

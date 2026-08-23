@@ -161,6 +161,23 @@ Three things worth knowing:
 If a repo already has a `pre-commit` — Loom bumps its patch version in one — put
 the guard **first**, so a refusal happens before anything with a side effect.
 
+## Types
+
+Keel ships JavaScript, and a TypeScript consumer cannot read JS out of
+`node_modules`. So `types/` holds `.d.mts` files — **generated from the JSDoc,
+not written by hand**:
+
+```bash
+npm run types    # regenerate after changing any signature
+```
+
+`npm test` fails if they are stale, which is the point: a hand-written
+declaration can quietly disagree with its implementation, and then the compiler
+lies to every consumer. The JSDoc is the single source of truth.
+
+Only the *types* are generated. Consumers import `src/*.mjs` directly, so editing
+keel still takes effect immediately with nothing to rebuild.
+
 ## Tests
 
 ```bash

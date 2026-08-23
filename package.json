@@ -5,18 +5,30 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.mjs",
-    "./icon": "./src/icon/index.mjs",
+    ".": {
+      "types": "./types/index.d.mts",
+      "default": "./src/index.mjs"
+    },
+    "./icon": {
+      "types": "./types/icon/index.d.mts",
+      "default": "./src/icon/index.mjs"
+    },
     "./window": {
-      "types": "./src/window/index.d.mts",
+      "types": "./types/window/index.d.mts",
       "default": "./src/window/index.mjs"
     }
   },
   "files": [
-    "src"
+    "src",
+    "types"
   ],
   "scripts": {
     "test": "node --test \"test/**/*.test.mjs\"",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "git config core.hooksPath .githooks",
+    "types": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
   }
 }

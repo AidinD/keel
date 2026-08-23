@@ -15,7 +15,6 @@
  * electron dependency of its own, which keeps it testable with two object
  * literals and keeps it out of every app's packaging decisions.
  */
-
 /**
  * Annotated rather than inferred: without this the generated declarations widen
  * these to `string`, and a consumer comparing against a channel name loses the
@@ -23,12 +22,11 @@
  *
  * @type {{ readonly minimize: 'window:minimize', readonly toggleMaximize: 'window:toggleMaximize', readonly close: 'window:close' }}
  */
-export const WINDOW_CHANNELS = {
-  minimize: 'window:minimize',
-  toggleMaximize: 'window:toggleMaximize',
-  close: 'window:close'
-}
-
+export declare const WINDOW_CHANNELS: {
+    readonly minimize: 'window:minimize';
+    readonly toggleMaximize: 'window:toggleMaximize';
+    readonly close: 'window:close';
+};
 /**
  * Register the three handlers a frameless window needs.
  *
@@ -40,45 +38,12 @@ export const WINDOW_CHANNELS = {
  *   `close` handler, so it does not need this - but an app that wants to decide
  *   per-window can.
  */
-export function registerWindowControls({ ipcMain, BrowserWindow, onClose }) {
-  if (ipcMain === undefined || BrowserWindow === undefined) {
-    throw new Error('registerWindowControls needs { ipcMain, BrowserWindow } from electron')
-  }
-
-  /**
-   * The window that sent the message - never the focused one.
-   *
-   * @param {{ sender: unknown }} event
-   */
-  const sender = (event) => BrowserWindow.fromWebContents(event.sender) ?? null
-
-  ipcMain.on(WINDOW_CHANNELS.minimize, (event) => {
-    sender(event)?.minimize()
-  })
-
-  ipcMain.on(WINDOW_CHANNELS.toggleMaximize, (event) => {
-    const window = sender(event)
-    if (window === null) {
-      return
-    }
-    if (window.isMaximized()) {
-      window.unmaximize()
-    } else {
-      window.maximize()
-    }
-  })
-
-  ipcMain.on(WINDOW_CHANNELS.close, (event) => {
-    const window = sender(event)
-    if (window === null) {
-      return
-    }
-    if (onClose !== undefined) {
-      onClose(window)
-      return
-    }
-    // Plain close, so an app that intercepts `close` to hide into a tray keeps
-    // working without knowing this module exists.
-    window.close()
-  })
-}
+export declare function registerWindowControls({ ipcMain, BrowserWindow, onClose }: {
+    ipcMain: {
+        on: (channel: string, listener: (event: any) => void) => void;
+    };
+    BrowserWindow: {
+        fromWebContents: (contents: any) => any;
+    };
+    onClose?: (window: any) => void;
+}): void;
