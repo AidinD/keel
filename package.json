@@ -12,6 +12,7 @@
     "src"
   ],
   "scripts": {
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "prepare": "git config core.hooksPath .githooks"
   }
 }
