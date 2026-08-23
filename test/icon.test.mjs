@@ -11,6 +11,8 @@ import {
   DEFAULT_LADDER,
   coverage,
   distSegment,
+  distSegmentAt,
+  distRoundedRect,
   distArc,
   distRing,
   flattenBezier,
@@ -124,6 +126,29 @@ test('distSegment survives a zero-length segment instead of returning NaN', () =
   // A closed outline whose sides meet at a point contains one of these, and the
   // NaN it used to produce painted black rather than nothing.
   assert.equal(distSegment(3, 4, 0, 0, 0, 0), 5)
+})
+
+test('distSegmentAt reports how far along the segment the nearest point is', () => {
+  // A tapered stroke reads its half-width off this, so the ends have to clamp
+  // rather than run past the segment - otherwise the taper keeps going into
+  // the round cap and the stroke comes to a point.
+  assert.deepEqual(distSegmentAt(5, 3, 0, 0, 10, 0), { distance: 3, t: 0.5 })
+  assert.equal(distSegmentAt(-5, 0, 0, 0, 10, 0).t, 0, 'before the start clamps to 0')
+  assert.equal(distSegmentAt(15, 0, 0, 0, 10, 0).t, 1, 'past the end clamps to 1')
+  assert.equal(distSegmentAt(3, 4, 0, 0, 0, 0).t, 0, 'and a zero-length segment is all start')
+})
+
+test('distRoundedRect is signed, so a plate can be filled rather than outlined', () => {
+  // 0,0 to 100,100 with a radius of 20.
+  const at = (x, y) => distRoundedRect(x, y, 0, 0, 100, 100, 20)
+  assert.equal(at(50, 50), -50, 'the centre is half the plate from the nearest edge')
+  assert.equal(at(0, 50), 0, 'a point on a flat edge is exactly on the outline')
+  assert.equal(at(-10, 50), 10, 'outside is positive')
+  // The corner: the arc centre sits at (20, 20), so the outline passes 20 away
+  // from it and the square corner at (0, 0) is outside the shape.
+  assert.ok(Math.abs(at(0, 0) - (Math.hypot(20, 20) - 20)) < 1e-9, 'the corner is rounded off')
+  assert.equal(coverage(at(50, 50), 0), 1, 'and coverage fills it, rather than tracing it')
+  assert.equal(coverage(at(-10, 50), 0), 0)
 })
 
 test('distArc gives round caps by measuring to the nearer endpoint', () => {

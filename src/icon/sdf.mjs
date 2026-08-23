@@ -28,14 +28,30 @@ export const rad = (degrees) => (degrees * Math.PI) / 180
  * @param {number} bx @param {number} by
  */
 export function distSegment(px, py, ax, ay, bx, by) {
+  return distSegmentAt(px, py, ax, ay, bx, by).distance
+}
+
+/**
+ * The same distance, plus how far along the segment the nearest point lies.
+ *
+ * That second number is what lets a stroke taper - a pen lands a little narrow,
+ * runs full through the middle, and eases off as it lifts. Tend's marks are
+ * drawn that way, and it is the difference between drawn and measured.
+ *
+ * @param {number} px @param {number} py
+ * @param {number} ax @param {number} ay
+ * @param {number} bx @param {number} by
+ * @returns {{ distance: number, t: number }} `t` runs 0 at `a` to 1 at `b`.
+ */
+export function distSegmentAt(px, py, ax, ay, bx, by) {
   const abx = bx - ax
   const aby = by - ay
   const lengthSquared = abx * abx + aby * aby
   if (lengthSquared === 0) {
-    return Math.hypot(px - ax, py - ay)
+    return { distance: Math.hypot(px - ax, py - ay), t: 0 }
   }
   const t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / lengthSquared))
-  return Math.hypot(px - (ax + abx * t), py - (ay + aby * t))
+  return { distance: Math.hypot(px - (ax + abx * t), py - (ay + aby * t)), t }
 }
 
 /**
@@ -105,6 +121,34 @@ export function distArc(px, py, cx, cy, r, fromDeg, toDeg) {
     Math.hypot(px - (cx + r * Math.cos(rad(fromDeg))), py - (cy + r * Math.sin(rad(fromDeg)))),
     Math.hypot(px - (cx + r * Math.cos(rad(toDeg))), py - (cy + r * Math.sin(rad(toDeg))))
   )
+}
+
+/**
+ * Signed distance to a rounded rectangle: negative inside, positive outside.
+ *
+ * The odd one out here, and deliberately. Every other helper returns an
+ * unsigned distance to an outline, because every other helper describes a
+ * stroke and a stroke is symmetric about its path. A plate is a filled shape,
+ * and filling needs to know which side you are on - so this is the one you pass
+ * to `coverage(distance, 0)` rather than to `coverage(distance, halfWeight)`.
+ *
+ * @param {number} px @param {number} py
+ * @param {number} x @param {number} y Top-left corner.
+ * @param {number} width @param {number} height
+ * @param {number} radius Corner radius.
+ */
+export function distRoundedRect(px, py, x, y, width, height, radius) {
+  const halfWidth = width / 2
+  const halfHeight = height / 2
+  const r = Math.min(radius, halfWidth, halfHeight)
+  // Distance from the centre, folded into one quadrant, then inset by the
+  // corner radius: what is left is the distance to a rectangle whose corners
+  // have been rounded off by `r`.
+  const dx = Math.abs(px - (x + halfWidth)) - (halfWidth - r)
+  const dy = Math.abs(py - (y + halfHeight)) - (halfHeight - r)
+  const outside = Math.hypot(Math.max(dx, 0), Math.max(dy, 0))
+  const inside = Math.min(Math.max(dx, dy), 0)
+  return outside + inside - r
 }
 
 /**

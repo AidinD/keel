@@ -63,15 +63,25 @@ Plain ESM with JSDoc types and **no build step**. Helm and Tend are JavaScript,
 the rest are TypeScript, and JS-with-JSDoc is consumed happily by both — so
 there is no `dist/` to rebuild by hand every time something changes.
 
-Linked from a sibling repo:
+Linked from a sibling repo. Which flag depends on what the app takes from keel,
+and on whether it bundles:
 
 ```bash
-npm install --save-dev file:../keel
+npm install --save-dev file:../keel   # keel/icon only, or the app bundles
+npm install --save file:../keel       # keel/window in an app with no build step
 ```
 
 `keel/icon` is a **build-time** dependency. It renders icons in a script; it
-never ships inside an app. Install it as a devDependency and it stays out of
-every packaging question.
+never ships inside an app, so a devDependency keeps it out of every packaging
+question. `keel/window` is different: it runs in the app. A bundler inlines it
+(Jot's electron-vite does, and `externalizeDepsPlugin` externalises
+`dependencies` only, so a devDependency is exactly right there) — but an app that
+ships its source unbuilt still has a live `import` at runtime, and then keel has
+to be a real dependency or electron-builder will not pack it. Tend is that case.
+
+Either way, verify it in the packaged app rather than in development. A preload
+that cannot resolve `keel/window` fails silently: the window buttons simply stop
+doing anything, with nothing in the log.
 
 ```js
 import { renderIco, renderPng, coverage, diagonalRamp, distArc, SMALL_BELOW } from 'keel/icon'
@@ -116,6 +126,14 @@ git status --short resources/    # expect no output
 
 That is how Jot was migrated. If the diff is not empty, something about the
 geometry changed too and it wants looking at.
+
+**One exception, and it is worth knowing before you panic at a diff.** An app
+whose generator supersampled a hard in-or-out test — Tend's did, 4×4 per pixel —
+cannot come out byte-identical, because keel computes coverage from the distance
+instead of sampling it. That is a genuine improvement and a genuine change. Prove
+it is only anti-aliasing: decode both PNGs, and check that every pixel that moved
+had a neighbour of a different colour in the original. A changed pixel in the
+middle of a flat area is a geometry change, and those you do have to look at.
 
 Then say so in the app, because `file:../keel` means a fresh clone of it will
 **fail `npm install`** without this repo checked out alongside:

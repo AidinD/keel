@@ -2,6 +2,53 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-08-23 — Tend as the second consumer, and what it caught
+
+Jot proved keel inside a bundler and a TypeScript codebase. Tend is the opposite
+on both counts — plain DOM, JS with JSDoc, no build step — and a shared layer that
+only works in one of those is not one. Four things came out of the second
+migration that the first could not have shown:
+
+**`keel/window` has to be a real `dependency` in an unbundled app.** Jot's
+electron-vite inlines it, so a devDependency is right there. Tend ships `src/**`
+as-is, so the import survives into the asar and electron-builder has to pack it.
+It does — npm symlinks a `file:` dependency and the packer dereferences it — but a
+preload that fails to resolve a bare specifier fails *silently*, so Tend's
+packaged E2E now clicks maximise and asserts the window resized. That is the only
+observable end of the chain from inside the renderer.
+
+**Derive the consumer's type from keel's declaration, don't restate it.** Tend
+annotates its preload global in `ui.js`, and the window-control half is
+`ReturnType<typeof import('keel/window').windowControlsBridge>`. Writing the three
+functions out again would have recreated the exact failure that generated
+declarations exist to prevent, one level further out.
+
+**A hand-written `src/index.d.mts` had survived the reversal below.** The drift
+test compares `types/` against a fresh generation, so it could not see a
+declaration sitting next to the source — and TypeScript *prefers* a `.d.mts` over
+the `.mjs` beside it, which means such a file quietly becomes the truth about a
+module nobody checks any more. There is now a test that `src/` contains no
+declaration files at all. A rule you reversed is not gone until the artefacts it
+produced are, which is the same lesson Helm's screenshots taught in a worse way.
+
+**The root barrel names every area.** It exported `icon` and not `window`. Keel is
+meant to be imported per-area, and the barrel exists only so `import 'keel'` is
+not a dead end — but a courtesy that carries half the package is worse than none,
+because you find out by getting `undefined`.
+
+**Two helpers went in for Tend's drawing.** `distSegmentAt` returns the distance
+*and* how far along the segment the nearest point is, which is what lets a stroke
+taper; `distSegment` is now a thin wrapper on it. `distRoundedRect` is the first
+**signed** distance here — every other helper describes a stroke, which is
+symmetric about its path, but a plate is filled and filling has to know which side
+you are on. It pairs with `coverage(d, 0)` rather than `coverage(d, halfWeight)`.
+
+Tend's icon therefore is **not** byte-identical, unlike the other three
+migrations: its generator supersampled 4×4 per pixel where keel computes coverage
+analytically. Measured rather than assumed — 1.5% of pixels moved, all on an
+outline, none inside a flat area, mean delta 0.18/255. Same geometry, slightly
+crisper, sixteen times less arithmetic.
+
 ## 2026-08-23 — Window chrome, and the price of having no build step
 
 `keel/window` is the second module: the three IPC handlers and the preload bridge

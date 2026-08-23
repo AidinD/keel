@@ -26,6 +26,22 @@ export declare const rad: (degrees: number) => number;
  */
 export declare function distSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number;
 /**
+ * The same distance, plus how far along the segment the nearest point lies.
+ *
+ * That second number is what lets a stroke taper - a pen lands a little narrow,
+ * runs full through the middle, and eases off as it lifts. Tend's marks are
+ * drawn that way, and it is the difference between drawn and measured.
+ *
+ * @param {number} px @param {number} py
+ * @param {number} ax @param {number} ay
+ * @param {number} bx @param {number} by
+ * @returns {{ distance: number, t: number }} `t` runs 0 at `a` to 1 at `b`.
+ */
+export declare function distSegmentAt(px: number, py: number, ax: number, ay: number, bx: number, by: number): {
+    distance: number;
+    t: number;
+};
+/**
  * Distance to an open polyline, given as `[[x, y], ...]`.
  *
  * @param {number} px @param {number} py @param {number[][]} points
@@ -57,6 +73,21 @@ export declare const distRing: (px: number, py: number, cx: number, cy: number, 
  * @param {number} fromDeg @param {number} toDeg
  */
 export declare function distArc(px: number, py: number, cx: number, cy: number, r: number, fromDeg: number, toDeg: number): number;
+/**
+ * Signed distance to a rounded rectangle: negative inside, positive outside.
+ *
+ * The odd one out here, and deliberately. Every other helper returns an
+ * unsigned distance to an outline, because every other helper describes a
+ * stroke and a stroke is symmetric about its path. A plate is a filled shape,
+ * and filling needs to know which side you are on - so this is the one you pass
+ * to `coverage(distance, 0)` rather than to `coverage(distance, halfWeight)`.
+ *
+ * @param {number} px @param {number} py
+ * @param {number} x @param {number} y Top-left corner.
+ * @param {number} width @param {number} height
+ * @param {number} radius Corner radius.
+ */
+export declare function distRoundedRect(px: number, py: number, x: number, y: number, width: number, height: number, radius: number): number;
 /**
  * A cubic bezier flattened to a polyline, so curves get the same round-capped
  * distance treatment as straight segments.

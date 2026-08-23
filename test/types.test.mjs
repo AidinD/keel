@@ -66,6 +66,21 @@ test('the committed declarations are what the source generates', () => {
   }
 })
 
+test('no declaration file lives beside the source', () => {
+  // The drift test above compares `types/` against a fresh generation, so it
+  // cannot see a hand-written declaration sitting in `src/` - and one did
+  // survive there for a while, left over from the first attempt at this. It was
+  // harmless only by luck: TypeScript prefers a `.d.mts` over the `.mjs` beside
+  // it, so such a file quietly becomes the truth about a module nobody is
+  // checking any more.
+  const strays = walk(join(root, 'src')).filter((path) => path.endsWith('.d.mts') || path.endsWith('.d.ts'))
+  assert.deepEqual(
+    strays.map((path) => relative(root, path)),
+    [],
+    'declarations belong in types/, generated - see DECISIONS.md'
+  )
+})
+
 test('every export in the map has a declaration beside it', () => {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'))
   for (const [name, entry] of Object.entries(pkg.exports)) {
