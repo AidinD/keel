@@ -24,12 +24,38 @@ None of that is interesting work, and all of it has to be right in every app.
 
 ## What's here
 
-| Import | What it is |
-| --- | --- |
-| `keel/icon` | PNG encode/decode, multi-size `.ico`, distance-field helpers for drawing a mark |
+| Import | What it is | When it runs |
+| --- | --- | --- |
+| `keel/icon` | PNG encode/decode, multi-size `.ico`, distance-field helpers for drawing a mark | build time |
+| `keel/window` | The three IPC handlers and the preload bridge a frameless title bar needs | runtime |
 
-More to come — window chrome, storage adapter, release script. See
-[DECISIONS.md](DECISIONS.md) for the shape and the order.
+More to come — storage adapter, release script. See [DECISIONS.md](DECISIONS.md)
+for the shape and the order.
+
+### `keel/window`
+
+Every app in the suite is frameless, so every app answers the same three messages
+from its header row. Electron is **injected**, so keel has no electron dependency
+and the whole thing is testable with two object literals:
+
+```js
+// main
+import { registerWindowControls } from 'keel/window'
+registerWindowControls({ ipcMain, BrowserWindow })
+
+// preload
+import { windowControlsBridge } from 'keel/window'
+contextBridge.exposeInMainWorld('app', { ...windowControlsBridge(ipcRenderer), /* ... */ })
+```
+
+It acts on **the window that sent the message**, never on the focused one. Tend
+used `BrowserWindow.getFocusedWindow()`, which is invisible with a single window
+and wrong the moment there are two — or when a click arrives while focus is
+elsewhere. Making the correct form the default is most of why this module exists.
+
+`close` is a plain `window.close()`, so an app that intercepts its own `close`
+event to hide into a tray keeps working without knowing keel is there. Jot does
+exactly that, and it still does.
 
 ## Using it
 

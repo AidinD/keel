@@ -6,7 +6,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.mjs",
-    "./icon": "./src/icon/index.mjs"
+    "./icon": "./src/icon/index.mjs",
+    "./window": {
+      "types": "./src/window/index.d.mts",
+      "default": "./src/window/index.mjs"
+    }
   },
   "files": [
     "src"

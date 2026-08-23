@@ -2,6 +2,59 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-08-23 — Window chrome, and the price of having no build step
+
+`keel/window` is the second module: the three IPC handlers and the preload bridge
+a frameless title bar needs, in five apps that had each written them out.
+
+**Electron is injected, not imported.** `registerWindowControls({ ipcMain,
+BrowserWindow })`. Keel has no electron dependency and should not grow one to
+describe two arguments, and the result is a module testable with two object
+literals - no electron, no window, no display.
+
+**It fixes a real difference, not just duplication.** Tend reached for
+`BrowserWindow.getFocusedWindow()`; Jot and Loom used
+`fromWebContents(event.sender)`. The first acts on whatever window is focused,
+which is invisible with one window and wrong with two. Consolidating made the
+correct form the default, which is a better reason to share code than saving
+lines.
+
+### Hand-written `.d.mts`, and why the no-build-step promise survived it
+
+The icon module got away with being plain JS because it is only imported from
+`scripts/`, which is outside every app's tsconfig. The window module is imported
+from `src/main` and `src/preload`, and TypeScript immediately said TS7016: no
+declaration file.
+
+- **Rejected: `allowJs` in the consumers.** It does not even work on its own -
+  TypeScript will not read JS out of `node_modules` without also setting
+  `maxNodeModuleJsDepth`. Two obscure flags in five repos to make an import
+  typecheck is the kind of setting that works until someone wonders why.
+- **Rejected: generating declarations.** That is a `dist/` to rebuild after every
+  change, which is precisely the `dist-core` tax this package was shaped to
+  avoid.
+- **Taken: write the declarations by hand, as source.** `src/window/index.d.mts`,
+  pointed at by a `types` condition in the exports map. Four declarations kept in
+  step by hand is cheaper than a build, and the electron shapes are described
+  structurally so keel still has no electron dependency.
+
+The honest cost: every future runtime module needs its own hand-written
+declarations, and they can drift from the implementation with nothing to catch
+it. Accepted for now because the modules are small. If keel ever grows an API
+big enough that this hurts, generating declarations is the answer and the
+no-build-step rule is the thing that should give way.
+
+### Jot is the first consumer, and keel stays a devDependency there
+
+Jot bundles main and preload with electron-vite, whose `externalizeDepsPlugin`
+externalises `dependencies` only. Keeping keel in `devDependencies` therefore
+gets it **bundled into `out/`**, so the packaged app has no runtime dependency on
+`node_modules` at all and `file:` never has to survive electron-builder.
+
+Helm and Tend have no bundler, so for them keel will have to be a real
+dependency. That asymmetry is a consequence of the suite genuinely being two
+kinds of app, and it is better stated than smoothed over.
+
 ## 2026-08-23 — A commit guard, because a convention had already failed
 
 Seven screenshots of Helm's own dashboard were committed to a public repo and sat
