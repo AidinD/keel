@@ -1,7 +1,7 @@
 # Keel
 
-The shared layer under the desktop suite — Jot, Nib, Loom, Helm, Tend, Nudge,
-PomPom. The keel is the member every other part of a hull attaches to.
+The shared layer under the desktop suite — Jot, Nib, Loom, Helm, Tend, Brief,
+Nudge, PomPom. The keel is the member every other part of a hull attaches to.
 
 Not an app. Nothing here has a window.
 
