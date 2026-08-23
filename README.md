@@ -91,6 +91,15 @@ git status --short resources/    # expect no output
 That is how Jot was migrated. If the diff is not empty, something about the
 geometry changed too and it wants looking at.
 
+Then say so in the app, because `file:../keel` means a fresh clone of it will
+**fail `npm install`** without this repo checked out alongside:
+
+- its **README** — the sibling-checkout requirement, under Develop
+- its **CLAUDE.md** — the same fact, where a session will actually read it
+- an **`icon` script** in package.json, so the command is the same in every app
+
+Skipping that is how a public repo ends up un-clonable by anyone but its author.
+
 ## Tests
 
 ```bash
