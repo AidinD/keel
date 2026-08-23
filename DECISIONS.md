@@ -11,6 +11,36 @@ fix cost a history rewrite of 734 commits, a force-push of 84 tags, and the repo
 going private — and it was forked before any of that, so the content is still in
 someone else's copy.
 
+### The root cause was not what it looked like
+
+Worth being precise, because the obvious diagnosis is wrong. The app/data
+separation was never broken: Helm keeps its data in `~/.helm`, Jot in
+`JOT_DATA_DIR`, Tend in `TEND_DATA_DIR`, and no data file was ever committed
+anywhere. The data was correctly outside the repo and ended up inside it anyway,
+as pixels.
+
+**A screenshot of a running app is a side channel that no data architecture
+protects against.** That is why this guard targets images rather than data files.
+
+The structural fault was test isolation, and it had already been fixed:
+
+- `04fb7d7e` added the E2E harness, and its first version launched `npm start` -
+  the real app against the real data directory. That is where the screenshots
+  came from.
+- `ce4b1bc` later gave every launch its own `--user-data-dir` and a temp
+  `HELM_CONFIG_PATH`. The harness has been properly isolated ever since.
+
+So the bug was found and closed a month before the audit. What nobody did was go
+back and delete what it had already produced. **The generalisable lesson: when
+you fix an isolation bug, the artefacts it already produced are part of the bug.**
+A fix that leaves its own evidence in the repo has not finished.
+
+The two lesser findings were not architectural at all. Hardcoded real paths in
+test fixtures (`D:/Repo/Northwind-Internal/...`) are fixture hygiene - a test that
+needs a path that looks like a work repo should invent one. And internal
+codenames in prose are an editorial judgement, not a leak: real context is what
+makes a decision log worth keeping.
+
 **The decision: a `pre-commit` hook, not a rule in CLAUDE.md.** Nobody committed
 those files carelessly. They were the output of an E2E screenshot harness, and
 `git add -A` did the rest. That is a mechanical failure, and a written convention
