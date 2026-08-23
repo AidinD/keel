@@ -100,6 +100,41 @@ Then say so in the app, because `file:../keel` means a fresh clone of it will
 
 Skipping that is how a public repo ends up un-clonable by anyone but its author.
 
+## The commit guard
+
+`hooks/` holds the suite's shared `pre-commit`. It refuses to add an image, media
+or data file outside `resources/`, `build/` and `assets/`, and anything whose path
+mentions a screenshot.
+
+It exists because of a real incident: seven screenshots of Helm's own dashboard
+sat in a **public** repo from July to August 2026. They showed the live session
+sidebar — a group labelled with the employer's name, entries naming real prospects
+and a client pitch. Nobody added them carelessly; they were the output of an E2E
+screenshot harness and `git add -A` did the rest. Taking them back meant rewriting
+734 commits and force-pushing 84 tags, and by then the repo had been forked.
+
+Installing it in a repo:
+
+```bash
+cp ../keel/hooks/pre-commit ../keel/hooks/no-leaky-assets.mjs .githooks/
+npm pkg set scripts.prepare="git config core.hooksPath .githooks"
+git config core.hooksPath .githooks          # for this clone, now
+```
+
+Three things worth knowing:
+
+- **The hook is copied, not imported.** A hook has to run in a clone where
+  `npm install` has not happened yet, so it cannot live in `node_modules`. The
+  canonical copy is here; if you change it, copy it out again.
+- **`prepare` is what makes it real.** `core.hooksPath` is per-clone config and
+  is never committed, which is the usual reason a committed hook quietly does
+  nothing. Running it from `prepare` means `npm install` turns it on.
+- **It only checks newly added files.** Being nagged about a file that was
+  reviewed months ago is how people learn to type `--no-verify` by reflex.
+
+If a repo already has a `pre-commit` — Loom bumps its patch version in one — put
+the guard **first**, so a refusal happens before anything with a side effect.
+
 ## Tests
 
 ```bash

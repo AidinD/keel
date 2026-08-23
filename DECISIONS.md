@@ -2,6 +2,43 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-08-23 — A commit guard, because a convention had already failed
+
+Seven screenshots of Helm's own dashboard were committed to a public repo and sat
+there for five weeks. They showed the real session sidebar: a group labelled with
+the employer's name, and entries naming actual prospects and a client pitch. The
+fix cost a history rewrite of 734 commits, a force-push of 84 tags, and the repo
+going private — and it was forked before any of that, so the content is still in
+someone else's copy.
+
+**The decision: a `pre-commit` hook, not a rule in CLAUDE.md.** Nobody committed
+those files carelessly. They were the output of an E2E screenshot harness, and
+`git add -A` did the rest. That is a mechanical failure, and a written convention
+does not catch mechanical failures — no amount of "remember not to" would have
+helped, because nobody was remembering anything at the time.
+
+Design choices worth keeping:
+
+- **Copied into each repo, not imported from here.** A hook must work in a clone
+  where nothing is installed, so `node_modules` is not available to it. The cost
+  is real duplication; the alternative is a guard that does not run when it
+  matters most, which is on a fresh clone.
+- **Wired through `prepare`.** `core.hooksPath` is per-clone config and never
+  committed. A committed hook with nobody pointing git at it is the standard way
+  this fails silently, so `npm install` sets it.
+- **Only newly added files are checked.** Re-flagging a file that was reviewed
+  long ago trains people to pass `--no-verify` reflexively, which disables the
+  guard for the one commit where it would have mattered.
+- **Allowlist by directory, deny by extension.** `resources/`, `build/` and
+  `assets/` are where the family legitimately keeps binaries. Everything else
+  with pixels in it is refused. That is deliberately blunt: a guard that tries to
+  judge whether a particular image is sensitive would be wrong occasionally and
+  trusted completely.
+
+**For any future app in the suite:** install the hook when you create the repo,
+not after. And treat a screenshot harness as producing output that belongs in
+`.gitignore` by default — its whole job is to capture whatever was on screen.
+
 ## 2026-08-23 — What Keel is, and the shape it has to have
 
 ### A separate repo linked with `file:`, not a monorepo
