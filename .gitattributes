@@ -1,0 +1,11 @@
+# LF in the repository, whatever the working tree looks like. The whole suite is
+# LF; the one place the convention is not cosmetic is the Windows shells, so they
+# are excepted - cmd.exe mis-parses labels and goto in a batch file with LF.
+* text=auto eol=lf
+
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Left alone byte for byte. A text filter here would corrupt them.
+*.png binary
+*.ico binary

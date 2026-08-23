@@ -1,0 +1,17 @@
+{
+  "name": "keel",
+  "version": "0.1.0",
+  "description": "The shared layer under Aidin's desktop suite: icon pipeline, window chrome, storage, release.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./icon": "./src/icon/index.mjs"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  }
+}
