@@ -45,6 +45,7 @@ not a total.
 | `keel/shell.css` | The frameless shell: body as a fixed flex column, the header pinned, the window buttons | runtime |
 | `keel/release` | The preflight guards a release has to pass, plus the clean and the process stop | release time |
 | `keel/storage` | Atomic writes that survive Dropbox, BOM-safe JSON reads, data-dir resolution | runtime |
+| `keel/secret` | One unsynced file of credentials, read-only, permissioned per app | runtime |
 
 That is the planned set. See [DECISIONS.md](DECISIONS.md) for why each one has
 the shape it does.
@@ -174,6 +175,61 @@ because a sandboxed process's writes under `%APPDATA%` are redirected into a
 private overlay the app never sees. Migration of existing data is **not** here: the
 apps' versions differ, and they *copy*, so pointing the variable at a scratch
 folder duplicates real data somewhere you did not intend.
+
+### `keel/secret`
+
+One file of credentials, outside every synced folder and every repository, that this module can only read.
+
+There is no consumer in the suite as this lands, and that is stated rather than hidden.
+It was built anyway for a specific reason: the pattern had already been written once, verified against real failures, and then lost when the app holding it dropped the vendor that needed a key.
+The next app to need one would have retyped it from memory and missed the same three things.
+
+```js
+import { openSecrets } from 'keel/secret'
+
+const secrets = openSecrets({ app: 'brief' })       // the caller must name itself
+const key = secrets.get('openai')
+if (!key.found) warn(key.reason)                    // already a sentence, not a code
+```
+
+**The three things, all from real failures.**
+A byte-order mark, which Notepad's "Save as" and PowerShell's `>` both write by default, travels into the key and the service answers `400` with no explanation.
+UTF-16, which the same dropdown offers, puts a zero byte between every character.
+And the trailing newline every editor adds on save.
+All three are invisible in the editor that produced them, which is why they cost hours rather than minutes.
+
+**No write path, enforced by a test.**
+A credential must never end up anywhere the person did not put it, and a comment saying so is worth nothing the day someone adds a convenient `save()`.
+The test reads this module's own source and fails if a write or network API appears in it.
+Rotating tokens - the kind an app obtains and the provider replaces - genuinely need writing and are deliberately **not** served here.
+That is a different mechanism with a different threat model, and it waits for a real consumer rather than being guessed at.
+
+**Not the operating system's credential store**, though that was the obvious answer.
+On Windows it encrypts with the account on *this* machine, so the stored blob cannot be read on the second one - and this suite deliberately runs two machines against one synced board.
+Something that looks portable and silently is not is worse than something plainly local.
+The deeper reason: an app that starts without anyone typing a password must be able to decrypt unattended, so anything running as that user can decrypt too.
+Encryption at rest here protects against an accidental *file read* and nothing else, and a path outside every synced folder and every repository already covers that.
+
+**Not a hosted secrets manager either.**
+A password manager's command line needs the master password to unlock and hands back a session that dies with the terminal, which is exactly wrong for an app that starts with Windows.
+Machine-account tokens fix that and are then themselves a credential in plaintext on disk: N secrets become one, bought with a network call on every app start and a cache for when it fails.
+The arrangement that gets the gain without the cost is organisational rather than technical - the password manager stays the source of truth a person edits, and this file is the local copy pasted in once per machine.
+
+**Per-app permission**, taken from [Automic Vault](https://github.com/automic-vault/automic-vault), which gates on what is being done rather than only on who is asking: it will pass `gh issue list` and stop `gh auth token`.
+That tool is macOS-only and unusable here, but the weakest useful version of the idea is five lines.
+The caller must name itself and an entry may list the apps it is for, so a wrong reader shows up as a refusal instead of as nothing at all.
+A malformed permission list is refused rather than ignored, because a typo must never fail in the permissive direction.
+
+```json
+{
+  "openai": { "value": "sk-...", "apps": ["brief"] },
+  "router": { "file": "D:\\keys\\router.txt" },
+  "scratch": "a plain string, readable by any app"
+}
+```
+
+`"apps": []` is the off switch - the entry stays documented and nothing may read it.
+`names()` describes what is configured without returning any values, so a settings window can render the state without becoming a way around the permission check.
 
 ### `keel/window`
 

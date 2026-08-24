@@ -435,3 +435,51 @@ day, the shell stylesheet, the release module and the storage primitives on
 2026-08-24. The prediction that storage would be the hard API question was right
 about the difficulty and wrong about the answer — the survey said not to build a
 store at all. See that entry.*
+
+## 2026-08-24 - `keel/secret`: a read, not a vault
+
+### Built with no consumer, and the reason is not speculation
+- **Decision:** ship `keel/secret` while nothing in the suite reads a credential.
+A survey of all ten repos found zero reads of an environment variable holding a key, token or password.
+- **Why anyway:** the pattern existed once, in the app that had an LLM vendor, and was verified against real failures.
+It was deleted with the vendor, and nothing recorded it.
+The next app to need a key would have written it from memory and missed the same three things - which is the exact failure mode this package exists to stop, and the reason the icon generator had four copies.
+- **What that reasoning does *not* license:** the write path.
+See below.
+
+### Read-only, guaranteed by a test rather than by intent
+- **Decision:** no write API in the module, and a test that reads the module's own source and fails if one appears.
+- **Why:** a credential must never end up anywhere the person did not put it themselves.
+That is a promise about every future edit, not about today's code, so it needs an enforcement that survives someone adding a convenient `save()`.
+- A second, narrower test asserts the module imports only `readFileSync`, `homedir` and `join` from Node.
+The guarantee is easier to keep if the module never holds a tool that could break it.
+
+### A plain file outside the synced folder, not the OS credential store
+- **Decision:** `%APPDATA%\keel\secrets.json`, per machine, overridable with `KEEL_SECRETS_FILE`.
+- **Alternative rejected - Electron's `safeStorage` / a keychain binding.** On Windows these encrypt with the account on *that* machine, so the blob cannot be read on the second one.
+The suite deliberately runs two machines against one synced board, so this produces something that looks portable and silently is not.
+- **And the encryption buys less than it appears to.** An app that starts unattended must be able to decrypt on its own, so anything running as that user can decrypt too.
+Encryption at rest protects against an accidental *file read* - a stray script, a backup, a synced folder - and against nothing else.
+A path outside every synced folder and every repository covers that case at a fraction of the moving parts.
+- **Alternative rejected - a hosted secrets manager (Bitwarden).** Its password-manager CLI is free but needs the master password to unlock and returns a session that dies with the terminal, which is exactly wrong for an app that starts with Windows.
+Secrets Manager machine-account tokens fix that, and the token is then itself a plaintext credential on disk: N secrets become one, bought with a network call at every app start plus a cache for when it fails.
+- **What was taken from it instead:** the password manager stays the source of truth a person edits, and this file is the local copy pasted in once per machine.
+That keeps rotation and "where did I put it" without making app startup depend on the network.
+- `%APPDATA%` is normally a trap for this suite, because a sandboxed process's writes there are redirected into a private overlay while its reads fall through to the real filesystem.
+A module that only reads is immune to that by construction.
+
+### The caller has to name itself
+- **Decision:** `openSecrets({ app })` is required and throws when omitted; an entry may list the apps allowed to read it.
+- **Why:** taken from Automic Vault, which gates on *what is being done* rather than only on who asks - it passes `gh issue list` and stops `gh auth token`.
+That tool is macOS-only, but the weakest useful version of its idea is five lines, and it is the one design choice here that is hard to add later.
+The same key handed to everything is a key whose misuse is invisible.
+- **A malformed permission list is a malformed entry.** `"apps": "brief"` is refused rather than read as "no list", because a typo must never fail in the permissive direction.
+- `names()` reports what is configured without returning values, so a settings window can show state without becoming a way around the check.
+
+### Rotating tokens are deliberately not served
+- **Decision:** the module handles credentials a person places and that never rotate.
+An OAuth refresh token - obtained by the app, replaced by the provider during use - must be written, and is left out.
+- **Why not both:** two kinds of secret with two threat models, and pretending they are one makes the module worse.
+`safeStorage` *is* the right answer for the rotating kind, and its machine-bound encryption is harmless there because re-authenticating on the second machine is a one-time click.
+- **Why not now:** the only candidate consumer is a calendar integration that may well be built a way that needs no credential at all.
+The shape of a cache for a token nobody holds is a guess.
