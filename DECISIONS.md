@@ -2,6 +2,54 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-08-24 — `keel/storage`: the primitives, and no store
+
+The fifth module, and the last of the planned set. It is the one where the API
+question was supposed to be hard, and the survey answered it in the other
+direction.
+
+**There is no store abstraction, because there is no shared store.** The five
+layers are different shapes and each shape is right for its app: Jot is one JSON
+document, Nib a file per note (which is what makes embedded images survivable and
+what stops two machines colliding), Tend an append-only event log with rollover
+and multiple writers, Brief a disposable JSON beside an append-only JSONL, Helm a
+set of small durable stores. An interface over those would need a flag per
+difference and would end up worse than the five copies. What they genuinely share
+is *file mechanics on Windows in a Dropbox folder*, which is a much smaller and
+much more duplicated thing.
+
+**The duplication was measured, not assumed.** `stripBom` appears identically in
+five files across Tend and Brief alone; the atomic write is in four repos; the
+data-dir resolution is the same eight lines in Jot and Nib with different names.
+
+**Three levels of correctness, and the best one was not the newest.** Helm's
+`writeFileAtomicSync` retries the rename, retries the temp cleanup, reports
+failures in plain language and never throws. Jot's and Nib's `writeFileAtomic`
+retries only the rename, cleans up with a single silent unlink, and throws. Helm's
+is ahead because Helm broke more: the silent unlink loses a race with the sync
+client, which is how its dispatch directory reached 1462 orphaned `.tmp` files.
+Jot's live data directory still holds one orphan. So the shared version is Helm's
+lessons applied to both call styles.
+
+**Both call styles are kept, deliberately.** The sync form returns
+`{ ok, error }` because its callers run straight from IPC handlers and have a real
+"the write did not happen" path — throwing is how those failures got lost in the
+first place. The async form throws, which is the signature Jot and Nib already
+call. Choosing one winner would have turned a swap into a rewrite in three apps,
+and the shape of the return value is a property of the caller, not of the write.
+
+**Its own test found a hole in the code it inherited.** `plainReason` had no case
+for `ENOTDIR`, so a file sitting where a folder has to be produced the raw errno
+in a user-facing toast — the exact failure the function exists to prevent. Helm's
+copy has had that hole all along.
+
+**Migration is not in here.** Jot and Nib each pair data-dir resolution with a
+"move the old data across" step, and those differ — one file versus a whole
+notebook. They also *copy* rather than move, which makes pointing the environment
+variable at a scratch folder a way to duplicate real data somewhere unintended.
+That happened on 2026-08-24 with Nib. A step with that much local knowledge and
+that sharp an edge belongs next to the data it understands.
+
 ## 2026-08-24 — `keel/release`: share the guards, not the release
 
 The fourth module. Four apps had a release script and none of them had the same
@@ -350,8 +398,8 @@ had to prove the packaging approach first, and because the API will change once 
 brand-new app (Brief) is the third consumer — migrating five apps against a v1
 API and then changing it means doing the work twice.
 
-*Written 2026-08-23. Window chrome landed the same day, the shell stylesheet and
-the release module on 2026-08-24. The storage adapter is the one still open, and
-the reasoning above is why it is last: it is the module where the API question is
-real, because Jot's storage carries a watcher, an atomic write, a lock and a
-double-encoding repair that the others do not have.*
+*Written 2026-08-23. All three landed within two days: window chrome the same
+day, the shell stylesheet, the release module and the storage primitives on
+2026-08-24. The prediction that storage would be the hard API question was right
+about the difficulty and wrong about the answer — the survey said not to build a
+store at all. See that entry.*

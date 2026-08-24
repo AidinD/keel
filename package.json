@@ -1,7 +1,7 @@
 {
   "name": "keel",
   "version": "0.1.0",
-  "description": "The shared layer under Aidin's desktop suite: icon pipeline, window chrome, storage, release.",
+  "description": "The shared layer under Aidin's desktop suite: icon pipeline, window chrome, shell CSS, release guards, storage primitives.",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -20,6 +20,10 @@
     "./shell": {
       "types": "./types/shell/index.d.mts",
       "default": "./src/shell/index.mjs"
+    },
+    "./storage": {
+      "types": "./types/storage/index.d.mts",
+      "default": "./src/storage/index.mjs"
     },
     "./window": {
       "types": "./types/window/index.d.mts",

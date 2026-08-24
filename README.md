@@ -30,9 +30,10 @@ None of that is interesting work, and all of it has to be right in every app.
 | `keel/window` | The three IPC handlers and the preload bridge a frameless title bar needs | runtime |
 | `keel/shell.css` | The frameless shell: body as a fixed flex column, the header pinned, the window buttons | runtime |
 | `keel/release` | The preflight guards a release has to pass, plus the clean and the process stop | release time |
+| `keel/storage` | Atomic writes that survive Dropbox, BOM-safe JSON reads, data-dir resolution | runtime |
 
-More to come — the storage adapter. See [DECISIONS.md](DECISIONS.md) for the
-shape and the order.
+That is the planned set. See [DECISIONS.md](DECISIONS.md) for why each one has
+the shape it does.
 
 ### `keel/shell.css`
 
@@ -107,6 +108,58 @@ command-line flag: a filter on a Chromium flag once stopped 19 processes at once
 because Chromium passes its flags down to every child it spawns. The spawn is
 injectable, which is how the test checks the match is narrow without stopping
 anything.
+
+### `keel/storage`
+
+The file primitives under the suite's stores — and deliberately **no store**.
+
+There is no `Store` class here, because the five storage layers are genuinely
+different shapes: Jot is one JSON document, Nib a file per note, Tend an
+append-only event log with rollover, Brief a disposable JSON plus an append-only
+JSONL, Helm a set of small durable stores. An abstraction over those would need a
+flag for every difference, which is how a shared thing becomes worse than five
+copies. What they all *do* share is writing a file atomically on Windows inside a
+Dropbox folder, and reading JSON something else may have touched.
+
+```js
+import { writeJsonAtomicSync, readJsonFile, resolveDataDir } from 'keel/storage'
+
+const result = writeJsonAtomicSync(path, state, { app: 'Jot' })
+if (!result.ok) toast(`Could not save: ${result.error}`)   // plain language, not an errno
+```
+
+**The write retries twice, not once.** The rename needs retrying because on
+Windows it fails with EPERM while another process holds the target — Helm lost a
+board update to exactly that on 2026-07-27. Less obviously, **the temp cleanup
+needs retrying too**: the sync client can grab a lock on the temp file the instant
+it appears, so the usual "unlinkSync and swallow" leaves it behind. That is how
+Helm's dispatch directory accumulated 1462 orphaned `.tmp` files. Jot's and Nib's
+copies only knew the first half, and Jot's live data directory still holds an
+orphan.
+
+**EPERM needs a second fact to interpret.** Windows reports a locked file and a
+permission-denied folder identically, so `isTransientLock(error, targetExists)`
+takes whether the destination exists: you can only fight over a file that is
+there. Retrying a permission problem just spends 377ms before giving a wrong
+answer, which Helm's pre-release review measured.
+
+**Both forms are here.** `writeFileAtomicSync` returns `{ ok, error }` and never
+throws, because its callers run straight from IPC handlers and have a real "the
+write did not happen" path — a throw is how those failures got lost. The async
+`writeFileAtomic` throws, keeping the signature Jot and Nib already call. Picking
+one winner would have made a migration into a rewrite.
+
+`stripBom` is one line and had been retyped in five files, which is exactly why:
+PowerShell writes UTF-8 with a BOM by default, `JSON.parse` refuses it, and a BOM
+is invisible in every editor. `readJsonFile` uses it, and distinguishes *absent*
+(normal on first run, no warning) from *unreadable* (something is wrong, warn).
+
+`resolveDataDir` shares the eight lines Jot and Nib each wrote, and the reasoning
+that keeps getting lost with them — in particular that the override exists partly
+because a sandboxed process's writes under `%APPDATA%` are redirected into a
+private overlay the app never sees. Migration of existing data is **not** here: the
+apps' versions differ, and they *copy*, so pointing the variable at a scratch
+folder duplicates real data somewhere you did not intend.
 
 ### `keel/window`
 
