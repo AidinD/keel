@@ -71,6 +71,18 @@ test('a screenshot is refused wherever it sits, allowlist included', () => {
   assert.ok(refused(['docs/recordings/demo.mp4']), 'recordings too')
 })
 
+test('a capture-shaped filename is refused even inside an allowed directory', () => {
+  // The residual hole after the ordering fix: only the literal directory names
+  // screenshots/captures/recordings were caught, so a bare capture dropped into
+  // build/ still passed - and 01-dashboard.png is the exact name of one of the
+  // seven screenshots that caused the leak.
+  assert.ok(refused(['build/01-dashboard.png']), 'numbered capture in build/')
+  assert.ok(refused(['assets/now-view.png']), 'now-view in assets/')
+  assert.ok(refused(['build/_dev-badge.png']), 'dev-badge in build/')
+  assert.ok(refused(['resources/main-window.png']), 'window capture in resources/')
+  assert.ok(refused(['assets/sidebar-preview.jpg']), 'sidebar preview')
+})
+
 test('a binary outside the asset directories is refused even without a telling name', () => {
   // _dev-badge.png sat directly in scripts/e2e/ with nothing in its name to
   // suggest a screenshot. It was a dashboard capture.
