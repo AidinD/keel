@@ -28,9 +28,42 @@ None of that is interesting work, and all of it has to be right in every app.
 | --- | --- | --- |
 | `keel/icon` | PNG encode/decode, multi-size `.ico`, distance-field helpers for drawing a mark | build time |
 | `keel/window` | The three IPC handlers and the preload bridge a frameless title bar needs | runtime |
+| `keel/shell.css` | The frameless shell: body as a fixed flex column, the header pinned, the window buttons | runtime |
 
 More to come — storage adapter, release script. See [DECISIONS.md](DECISIONS.md)
 for the shape and the order.
+
+### `keel/shell.css`
+
+Two apps shipped with `body` as the scroller. In a frameless window that takes
+the header off screen, and the header is the drag handle and the only close
+button — so you are left with a window you can neither move nor close. Tend
+carried it as an open P0 with `min-height: calc(100vh - 43px)`, a hardcoded
+header height, which is the tell: with a flex column that number does not need
+to exist.
+
+```html
+<!-- keel first, so anything below can override it -->
+<link rel="stylesheet" href="../../node_modules/keel/src/shell/shell.css" />
+<link rel="stylesheet" href="app.css" />
+```
+
+A bundled app writes `import 'keel/shell.css'` instead. Either way, **verify it
+in the packaged build** — a `<link>` into `node_modules` has to resolve out of
+the asar, and a stylesheet that fails to load is not an error anywhere.
+
+It provides layout mechanics and the window buttons, and deliberately nothing
+else: no palette, no typography, not even the header's hairline or its padding.
+A separator and a set of proportions are how an app *looks*, and the first app
+this did not suit would fork it. Every colour comes from a token the app defines
+— `--bg`, `--text`, `--text-dim`, `--surface-2`, `--critical` — with no
+fallbacks, so a missing one looks wrong at once instead of resolving to something
+plausible.
+
+`missingTokens(css)` from `keel/shell` says which a consumer has not defined. It
+exists because Nib referenced `--accent-soft` from a rule and never defined it,
+and CSS said nothing at all for weeks: a missing custom property is not an error,
+it is a rule that quietly does less than it says.
 
 ### `keel/window`
 

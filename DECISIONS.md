@@ -2,6 +2,55 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-08-24 — `keel/shell.css`: the layout, and nothing that is taste
+
+The third module. `body` as a fixed flex column, the header pinned, one scrolling
+region, the window buttons.
+
+**It closes a live bug in two apps.** Brief shipped with a scrolling body and so
+did Tend, where it was an open P0. In a frameless window that takes the header
+off screen and the header is the drag handle and the only close button — the
+window becomes unmovable and unclosable. Tend's `min-height: calc(100vh - 43px)`
+was the tell: a hardcoded header height, kept in sync by hand, which a flex
+column removes the need for entirely.
+
+**The boundary is the interesting decision.** Layout mechanics and the window
+buttons — no palette, no typography, no spacing, and not even the header's
+hairline rule or its padding. A separator and a set of proportions are how an app
+looks rather than how it works, and a shared stylesheet that reached into those
+would be a theme pretending to be a utility. The first app it did not suit would
+fork it, and then there would be seven again.
+
+That boundary is enforced rather than stated: a test asserts the stylesheet
+contains **no literal colour at all**. Every one comes from a token the consumer
+defines.
+
+**No fallbacks in the `var()` calls, on purpose.** A missing custom property is
+not an error in CSS — it is a rule that quietly does less than it says. Nib
+referenced `--accent-soft` from a rule and never defined it, and that background
+painted nothing for weeks with no complaint from anywhere. So `SHELL_TOKENS`
+lists what the sheet reads, `missingTokens()` reports what a consumer lacks, and
+a test holds the list and the stylesheet in agreement in both directions —
+listed-but-unused fails too, which is how `--line-soft` was caught being
+documented and never written.
+
+**Each app still arranges its own interior.** Tend has a rail and a main column;
+Brief has one column. keel provides only the part that is identical, so Tend puts
+`overflow-y` on its own `main` and the rail stays put while the list scrolls.
+Trying to serve both interiors from here is how the shared thing becomes the
+thing everyone works around.
+
+**Verify it in the packaged build.** The unbundled apps reach it with a `<link>`
+into `node_modules`, which has to resolve out of the asar. Both E2E harnesses now
+assert `getComputedStyle(document.body).display === "flex"` before asserting
+anything about scrolling — a stylesheet that failed to load is silent, and the
+scroll assertions would then be testing the app's own CSS by accident.
+
+**The exports-map test grew a case.** `./shell.css` is a bare path with no
+declaration, which the old test treated as a missing `types` condition. It now
+asserts a string export points at a file that exists, which still catches the
+typo that would otherwise only show up as an unstyled window.
+
 ## 2026-08-23 — Tend as the second consumer, and what it caught
 
 Jot proved keel inside a bundler and a TypeScript codebase. Tend is the opposite

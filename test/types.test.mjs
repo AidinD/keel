@@ -81,9 +81,17 @@ test('no declaration file lives beside the source', () => {
   )
 })
 
-test('every export in the map has a declaration beside it', () => {
+test('every export in the map points at something that exists', () => {
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'))
   for (const [name, entry] of Object.entries(pkg.exports)) {
+    // An asset export is a bare path. It has no declaration and should not be
+    // required to have one - but it does have to exist, which is the half of
+    // this test that catches a typo in a stylesheet path nobody imports in JS.
+    if (typeof entry === 'string') {
+      assert.doesNotThrow(() => statSync(join(root, entry)), `${name} points at ${entry}, which does not exist`)
+      continue
+    }
+
     assert.ok(entry.types, `${name} has no types condition`)
     assert.doesNotThrow(
       () => statSync(join(root, entry.types)),

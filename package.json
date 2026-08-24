@@ -16,7 +16,12 @@
     "./window": {
       "types": "./types/window/index.d.mts",
       "default": "./src/window/index.mjs"
-    }
+    },
+    "./shell": {
+      "types": "./types/shell/index.d.mts",
+      "default": "./src/shell/index.mjs"
+    },
+    "./shell.css": "./src/shell/shell.css"
   },
   "files": [
     "src",

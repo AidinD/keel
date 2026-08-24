@@ -1,0 +1,127 @@
+/*
+ * The frameless app shell: a fixed header and one scrolling region.
+ *
+ * Every app in the suite is frameless, which means the header row is also the
+ * only drag handle and carries the only close button. Two of them shipped with
+ * `body` as the scroller, which takes that row off screen and leaves you with a
+ * window you cannot move or close. Brief had it; Tend had it as an open P0 with
+ * `min-height: calc(100vh - 43px)` - a hardcoded header height, which is the
+ * tell. With a flex column that number does not need to exist.
+ *
+ * ## What is here and what is deliberately not
+ *
+ * Layout mechanics and the window buttons. Nothing else - no palette, no
+ * typography, no spacing scale. Not even the header's hairline rule or its
+ * padding: a separator and a set of proportions are how an app looks, not how it
+ * works, and each app draws its own.
+ *
+ * A shared stylesheet that reached into those would be a theme pretending to be
+ * a utility, and the first app it did not suit would fork it. Every colour below
+ * comes from a token the app defines, so this file looks like whichever app
+ * loads it.
+ *
+ * ## Tokens the app must define
+ *
+ *   --bg          the window background
+ *   --text        body text
+ *   --text-dim    the window buttons at rest
+ *   --surface-2   a button under the pointer
+ *   --critical    the close button under the pointer
+ *
+ * They are all read through `var()` with no fallback on purpose: a missing token
+ * should look wrong immediately rather than resolve to something plausible.
+ *
+ * ## How to load it
+ *
+ * A bundled app imports it: `import 'keel/shell.css'`.
+ * An app with no build step links it, which resolves inside an asar too:
+ *   <link rel="stylesheet" href="../../node_modules/keel/src/shell/shell.css" />
+ * Load it BEFORE the app's own stylesheet, so anything here can be overridden.
+ */
+
+html,
+body {
+  height: 100%;
+}
+
+/*
+ * The window is a fixed frame. `body` must never be the scroller.
+ *
+ * This is the whole point of the file. A scrolling body takes the header with
+ * it, and in a frameless window that is the drag handle and the close button.
+ */
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/*
+ * The header: wordmark, drag handle, window buttons.
+ *
+ * `flex: none` rather than a height, so the app can put whatever it likes in
+ * here without a magic number appearing somewhere else to compensate.
+ */
+.app-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  -webkit-app-region: drag;
+}
+
+/*
+ * Anything interactive has to opt out of the drag region, or it cannot be
+ * clicked at all - the drag handle swallows the press.
+ */
+.app-header button,
+.app-header input,
+.app-header select,
+.app-header a {
+  -webkit-app-region: no-drag;
+}
+
+/* The one scrolling region. `min-height: 0` is what lets it shrink inside the
+   flex column instead of pushing the header off the top. */
+.app-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ------------------------------------------------------- window buttons -- */
+
+.window-controls {
+  display: flex;
+  gap: 2px;
+}
+
+.window-controls button {
+  width: 28px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.window-controls button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* Close is the one button worth making unmistakable under the pointer. */
+.window-controls button.danger:hover {
+  background: var(--critical);
+  color: var(--bg);
+}
