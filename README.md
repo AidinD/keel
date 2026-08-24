@@ -19,8 +19,16 @@ family, and each of them had grown its own copy of the same plumbing. As of
   needed a CRLF exception
 - two competing release paths in Loom, which raced and produced duplicate draft
   releases twice
+- the atomic write in **four** repos at three different levels of correctness, and
+  `stripBom` — one line — retyped in five files
+- four release scripts with four different sets of guards, so the app missing two
+  of them published a release that did nothing and printed "Published"
 
 None of that is interesting work, and all of it has to be right in every app.
+
+All of it is migrated as of 2026-08-24, and the migrations were verified rather
+than trusted: the icons came out byte-identical in every repo, and each app's
+tests were run after the swap.
 
 ## What's here
 
@@ -192,21 +200,30 @@ Plain ESM with JSDoc types and **no build step**. Helm and Tend are JavaScript,
 the rest are TypeScript, and JS-with-JSDoc is consumed happily by both — so
 there is no `dist/` to rebuild by hand every time something changes.
 
-Linked from a sibling repo. Which flag depends on what the app takes from keel,
-and on whether it bundles:
+Linked from a sibling repo. Which flag depends on **whether the app bundles**, not
+on which parts it uses:
 
 ```bash
-npm install --save-dev file:../keel   # keel/icon only, or the app bundles
-npm install --save file:../keel       # keel/window in an app with no build step
+npm install --save-dev file:../keel   # the app bundles: Jot, Nib, Loom
+npm install --save file:../keel       # the app ships source: Helm, Tend, Brief
 ```
 
-`keel/icon` is a **build-time** dependency. It renders icons in a script; it
-never ships inside an app, so a devDependency keeps it out of every packaging
-question. `keel/window` is different: it runs in the app. A bundler inlines it
-(Jot's electron-vite does, and `externalizeDepsPlugin` externalises
-`dependencies` only, so a devDependency is exactly right there) — but an app that
-ships its source unbuilt still has a live `import` at runtime, and then keel has
-to be a real dependency or electron-builder will not pack it. Tend is that case.
+A bundler inlines keel, so nothing has to be resolved at runtime and a
+devDependency is exactly right — electron-vite's `externalizeDepsPlugin`
+externalises `dependencies` only, which is what makes that work. An app that ships
+its source unbuilt still has a live `import` when it runs, and then keel must be a
+real dependency or electron-builder will not pack it.
+
+`keel/icon` is the one part that never ships either way: it renders icons in a
+script at build time. That is why the split used to look like "icon versus window"
+— it was really "bundles versus does not", and `keel/storage` made the difference
+visible, because it runs inside every app.
+
+Verify it in the **packaged** app rather than in development. Both failure modes
+are silent: a preload that cannot resolve `keel/window` leaves the window buttons
+doing nothing with no log line, and a devDependency that turns out not to have
+been inlined fails the same quiet way. Grep the built bundle for keel's code, or
+check `node_modules` inside the asar.
 
 Either way, verify it in the packaged app rather than in development. A preload
 that cannot resolve `keel/window` fails silently: the window buttons simply stop
