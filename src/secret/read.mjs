@@ -47,6 +47,17 @@
  * everything is a key whose misuse is invisible, and naming the caller is what
  * makes a wrong reader show up as a refusal instead of as nothing at all.
  *
+ * **The name is self-declared, so this is a discipline aid and not a boundary.**
+ * Any code that can read the file can also pass `app: 'brief'` and get whatever
+ * Brief may have. Within one author's own suite that is the whole value - it turns
+ * a wrong reader into a visible refusal, and it documents intent at the call site.
+ * It is worth nothing against code that wants the key: enforcing it would need the
+ * operating system to say which binary is asking, which is precisely what Automic
+ * Vault does with verified launchers on macOS and which has no cheap Windows
+ * equivalent. The rule that follows: **never put a secret in this file that some
+ * process on this machine must not have.** Everything here is readable by anything
+ * running as this user, and the `apps` list does not change that.
+ *
  * ## The file
  *
  * ```json

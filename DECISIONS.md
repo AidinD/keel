@@ -483,3 +483,31 @@ An OAuth refresh token - obtained by the app, replaced by the provider during us
 `safeStorage` *is* the right answer for the rotating kind, and its machine-bound encryption is harmless there because re-authenticating on the second machine is a one-time click.
 - **Why not now:** the only candidate consumer is a calendar integration that may well be built a way that needs no credential at all.
 The shape of a cache for a token nobody holds is a guess.
+
+## 2026-08-24 - The permission check is a discipline aid, and using it outside the suite
+
+### The app name is self-declared, and that is a documented limit rather than a gap
+- **Decision:** keep the per-app check, and state plainly in the module, the README and here that it is not a security boundary.
+- **Why it matters to write down:** the check reads like access control, so the next reader will assume it is.
+Anything that can open the file can also pass `app: 'brief'` and take whatever Brief may have.
+- **What it does buy, and it is not nothing:** a wrong reader becomes a visible refusal instead of silence, and the call site documents which secret an app is entitled to.
+Both are worth having in a suite maintained by one author.
+- **What real enforcement would take:** the operating system telling the module which binary is asking.
+That is exactly what Automic Vault does with verified launchers, and it is macOS-only with no cheap Windows equivalent.
+- **The rule that follows:** never put a secret in this file that some process on this machine must not have.
+Everything in it is readable by anything running as this user, and an `apps` list does not change that.
+
+### Using `keel/secret` from an app outside the family
+- **Distribution is the easy half.** Keel is consumed as `file:../keel`, so an outside app needs keel published to npm or the four files vendored.
+The file format is not secret and publishing it costs nothing.
+- **The permission check is the hard half**, for the reason above: an outside app's entry in `apps` means only that it was polite enough to name itself honestly.
+- **So the split is by what the secret is worth, not by which app wants it.** A shared file is right for credentials whose blast radius is this machine anyway.
+A secret that must be withheld from some process on this machine needs a mechanism this file cannot provide.
+
+### Migrating the credentials that exist today: mostly not possible, and that is the finding
+- **Surveyed 2026-08-24.** Five real credentials exist on this machine, and the consumer of every one of them is either the agent harness or a third-party tool, not an app in this suite.
+Three sit in the harness's own MCP configuration, one is a Cloudflare token in a repo `.env` read by a CLI, and one is a GitHub token already held in the Windows credential store by `gh`.
+- **Only one is even a candidate:** a local stdio MCP server whose key arrives as an environment variable, which a launcher shim could read from here instead.
+The other two MCP credentials travel as an HTTP `Authorization` header on a remote transport, so there is no process to wrap.
+- **Decision: do not migrate any of them yet.** Copying a secret into a second file means two places to rotate and one that gets forgotten, and it buys nothing while nothing reads this module.
+- **The trigger to revisit is the first app in this suite that needs a key**, at which point the module already exists - which was the whole reason for building it early.

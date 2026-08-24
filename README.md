@@ -231,6 +231,16 @@ A malformed permission list is refused rather than ignored, because a typo must 
 `"apps": []` is the off switch - the entry stays documented and nothing may read it.
 `names()` describes what is configured without returning any values, so a settings window can render the state without becoming a way around the permission check.
 
+**The app name is self-declared, so the permission is a discipline aid and not a security boundary.**
+Anything that can read the file can also pass `app: 'brief'`.
+Within one author's own suite that is the whole value: it turns a wrong reader into a visible refusal and it documents intent at the call site.
+It is worth nothing against code that wants the key, and enforcing it would need the operating system to say which binary is asking - which is what Automic Vault does with verified launchers on macOS and which has no cheap Windows equivalent.
+So the rule is: never put a secret in this file that some process on this machine must not have.
+
+That is also the answer to using this from an app outside the family.
+Distribution is the easy half - keel is consumed as `file:../keel`, so an outside app needs it published or vendored, and the file format is not secret.
+The hard half is that an outside app's `apps` entry means only that the app was polite enough to say who it was.
+
 ### `keel/window`
 
 Every app in the suite is frameless, so every app answers the same three messages
