@@ -168,8 +168,13 @@ it is only anti-aliasing: decode both PNGs, and check that every pixel that move
 had a neighbour of a different colour in the original. A changed pixel in the
 middle of a flat area is a geometry change, and those you do have to look at.
 
-Then say so in the app, because `file:../keel` means a fresh clone of it will
-**fail `npm install`** without this repo checked out alongside:
+Then say so in the app, because a fresh clone of it needs this repo checked out
+alongside — and **will not tell anyone so**. Measured on npm 11.6.2: with the
+sibling missing, both `npm install` and `npm ci` link `file:../keel` to a
+dangling symlink, print "added 1 package", and exit 0. For a devDependency the
+failure surfaces later, as `ERR_MODULE_NOT_FOUND` from `npm run icon`; for an app
+that imports `keel/window` at runtime it surfaces as window buttons that do
+nothing. A green install is not evidence keel is there, so write it down:
 
 - its **README** — the sibling-checkout requirement, under Develop
 - its **CLAUDE.md** — the same fact, where a session will actually read it
