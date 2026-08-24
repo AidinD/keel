@@ -96,6 +96,38 @@ test('the call is stripped of tools and MCP servers', async () => {
   assert.ok(!seen.includes('--bare'), '--bare would force API-key auth instead of the subscription')
 })
 
+test('it runs outside any project, so no CLAUDE.md is dragged into the question', async () => {
+  /** @type {any} */
+  let options
+  await ask({
+    prompt: 'anything',
+    model: 'test-model',
+    spawnImpl: (_path, _args, opts) => {
+      options = opts
+      return fakeChild({ stdout: cliJson({ result: 'fine' }) })
+    }
+  })
+
+  assert.notEqual(options.cwd, process.cwd(), 'inheriting the caller cwd loads that repo instructions')
+  assert.ok(typeof options.cwd === 'string' && options.cwd.length > 0)
+})
+
+test('a caller that wants a project context can still say so', async () => {
+  /** @type {any} */
+  let options
+  await ask({
+    prompt: 'anything',
+    model: 'test-model',
+    cwd: 'C:\\some\\repo',
+    spawnImpl: (_path, _args, opts) => {
+      options = opts
+      return fakeChild({ stdout: cliJson({ result: 'fine' }) })
+    }
+  })
+
+  assert.equal(options.cwd, 'C:\\some\\repo')
+})
+
 test('the prompt is one argument, so a space in it cannot split the call', async () => {
   /** @type {string[]} */
   let seen = []

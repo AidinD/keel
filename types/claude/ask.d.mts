@@ -20,6 +20,15 @@
  * small judging call from roughly $0.068 to $0.015. So: no tools, no MCP, and an
  * empty strict config so nothing is inherited.
  *
+ * The working directory is part of the same problem and is easy to miss.
+ * Claude Code loads the CLAUDE.md files it finds from the current directory
+ * upwards, so a call made from inside a repository quietly carries that
+ * project's instructions into a question that has nothing to do with it. The
+ * same trivial extraction measured 8.3 cents from a repo and 2.7 from a
+ * neutral directory - a third of the cost, for context that could only have
+ * confused the answer. So `cwd` defaults to somewhere with no project in it,
+ * and a caller that genuinely wants a project's own instructions has to say so.
+ *
  * ## What it is not
  *
  * Not a session. There is no conversation, no resume, no streaming, no tool use.
@@ -64,7 +73,9 @@ export type AskOptions = {
      */
     schema?: Record<string, any>;
     /**
-     * Where to run. Affects which project settings load.
+     * Where to run. Defaults to a directory with no
+     * project in it, so no CLAUDE.md is dragged into the question. Pass one only
+     * when the project's own instructions are genuinely part of what you are asking.
      */
     cwd?: string;
     timeoutMs?: number;
@@ -91,7 +102,9 @@ export type AskResult = {
  * @property {"low" | "medium" | "high"} [effort]
  * @property {Record<string, any>} [schema] JSON Schema. Given one, the answer is
  *   validated by the CLI and comes back parsed.
- * @property {string} [cwd] Where to run. Affects which project settings load.
+ * @property {string} [cwd] Where to run. Defaults to a directory with no
+ *   project in it, so no CLAUDE.md is dragged into the question. Pass one only
+ *   when the project's own instructions are genuinely part of what you are asking.
  * @property {number} [timeoutMs]
  * @property {typeof spawn} [spawnImpl] Test seam.
  */
