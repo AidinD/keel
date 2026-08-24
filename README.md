@@ -46,6 +46,7 @@ not a total.
 | `keel/release` | The preflight guards a release has to pass, plus the clean and the process stop | release time |
 | `keel/storage` | Atomic writes that survive Dropbox, BOM-safe JSON reads, data-dir resolution | runtime |
 | `keel/secret` | One unsynced file of credentials, read-only, permissioned per app | runtime |
+| `keel/claude` | One structured question to Claude Code, on its own sign-in - no API key | runtime |
 
 That is the planned set. See [DECISIONS.md](DECISIONS.md) for why each one has
 the shape it does.

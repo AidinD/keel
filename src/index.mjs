@@ -3,6 +3,7 @@
 // and vice versa. This exists only so `import ... from 'keel'` is not a dead
 // end, and it names every area, because a courtesy barrel that carries half
 // the package is worse than none - you find out by getting `undefined`.
+export * as claude from './claude/index.mjs'
 export * as icon from './icon/index.mjs'
 export * as release from './release/index.mjs'
 export * as secret from './secret/index.mjs'

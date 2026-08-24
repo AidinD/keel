@@ -1,3 +1,4 @@
+export * as claude from './claude/index.mjs';
 export * as icon from './icon/index.mjs';
 export * as release from './release/index.mjs';
 export * as secret from './secret/index.mjs';
