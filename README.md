@@ -295,6 +295,32 @@ nothing. A green install is not evidence keel is there, so write it down:
 
 Skipping that is how a public repo ends up un-clonable by anyone but its author.
 
+## `.gitattributes`
+
+Keel's own `.gitattributes` is the suite's, and it is **copied out**, not imported
+— git reads it from the repo it is in, so there is nowhere else it could live:
+
+```bash
+cp ../keel/.gitattributes .
+git add --renormalize .          # look at the diff before committing it
+```
+
+Three lines earn their place. `* text=auto eol=lf` is the convention. The `*.cmd`
+and `*.bat` exceptions are **not** cosmetic: cmd.exe mis-parses labels and `goto`
+in a batch file with LF endings. And `*.png`/`*.ico` are marked binary so no text
+filter can ever touch a generated icon byte for byte.
+
+Adding it to a repo that has CRLF files already committed produces one whole-file
+diff per file. Take it: without the normalisation, the next real edit to such a
+file carries the same diff mixed in with actual changes, which is strictly worse.
+Jot's two files (2026-08-24) and Nib's twenty-eight both went this way. Record the
+commit in a `.git-blame-ignore-revs` afterwards, or blame on those files points at
+the normalisation for every line:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 ## The commit guard
 
 `hooks/` holds the suite's shared `pre-commit`. It refuses to add an image, media
