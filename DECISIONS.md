@@ -2,6 +2,38 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-08-24 — Nudge and PomPom, and what the survey missed
+
+The package was declared complete with six consumers. Nudge and PomPom were in
+the header line of this README the whole time and in none of the counts.
+
+**What they were carrying.** Their own icon generators (227 and 302 lines, the
+same PNG and ICO writers), no `.gitattributes`, and a release script with **no
+guards at all** — byte-identical to each other, and the same version Nib had
+before it published a release that did nothing and printed "Published". So both
+could have lost a release the same way, and neither had a check that the tree
+matched a commit.
+
+**The measurement was of the apps in front of me, and it read as a total.** Every
+count in the Why section above — four repos, five times, seven repos — came from
+grepping the apps that happened to be checked out and open. That is a floor, and
+writing it down as a number made it look like a ceiling. The fix is not a better
+grep; it is saying so, which the README now does.
+
+**Signed versus unsigned, and why the empty diff still held.** These two draw with
+SIGNED distances — negative inside — and union shapes with a plain `Math.min`,
+where keel's primitives are unsigned and `coverage` subtracts the half-weight
+itself. The two are algebraically the same, which is not the same as bitwise. So
+the migration keeps the arithmetic in the original order — `distRing(...) - half`,
+exactly what the local `sdRing` did — and calls `coverage(signed, 0)`. Both icons
+came out byte-identical, which is the only evidence that reasoning was right.
+
+**PomPom keeps its shapes.** An ellipse, and a polygon that knows inside from
+outside. keel has neither, and its `distPolygon` is unsigned — a filled body
+cannot use it. Moving them would have meant either a second polygon function in
+keel or a flag on the first, for one consumer. It also had a dead `sdCone` left
+over from a rejected version of the leaves, which the migration removed.
+
 ## 2026-08-24 — `keel/storage`: the primitives, and no store
 
 The fifth module, and the last of the planned set. It is the one where the API

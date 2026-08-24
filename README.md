@@ -26,9 +26,15 @@ family, and each of them had grown its own copy of the same plumbing. As of
 
 None of that is interesting work, and all of it has to be right in every app.
 
-All of it is migrated as of 2026-08-24, and the migrations were verified rather
-than trusted: the icons came out byte-identical in every repo, and each app's
-tests were run after the swap.
+All eight apps are migrated as of 2026-08-24, and the migrations were verified
+rather than trusted: the icons came out byte-identical in every repo, and each
+app's tests were run after the swap.
+
+Nudge and PomPom were not in the counts above — they were found later, carrying
+the same icon pipeline, an unguarded release script, and no `.gitattributes`.
+Their release scripts were byte-identical to each other and to the version Nib
+had before it lost a release to the missing checks. Assume the list is a floor,
+not a total.
 
 ## What's here
 
@@ -204,8 +210,8 @@ Linked from a sibling repo. Which flag depends on **whether the app bundles**, n
 on which parts it uses:
 
 ```bash
-npm install --save-dev file:../keel   # the app bundles: Jot, Nib, Loom
-npm install --save file:../keel       # the app ships source: Helm, Tend, Brief
+npm install --save-dev file:../keel   # bundles: Jot, Nib, Loom, Nudge, PomPom
+npm install --save file:../keel       # ships source: Helm, Tend, Brief
 ```
 
 A bundler inlines keel, so nothing has to be resolved at runtime and a
