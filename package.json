@@ -13,13 +13,17 @@
       "types": "./types/icon/index.d.mts",
       "default": "./src/icon/index.mjs"
     },
-    "./window": {
-      "types": "./types/window/index.d.mts",
-      "default": "./src/window/index.mjs"
+    "./release": {
+      "types": "./types/release/index.d.mts",
+      "default": "./src/release/index.mjs"
     },
     "./shell": {
       "types": "./types/shell/index.d.mts",
       "default": "./src/shell/index.mjs"
+    },
+    "./window": {
+      "types": "./types/window/index.d.mts",
+      "default": "./src/window/index.mjs"
     },
     "./shell.css": "./src/shell/shell.css"
   },

@@ -29,9 +29,10 @@ None of that is interesting work, and all of it has to be right in every app.
 | `keel/icon` | PNG encode/decode, multi-size `.ico`, distance-field helpers for drawing a mark | build time |
 | `keel/window` | The three IPC handlers and the preload bridge a frameless title bar needs | runtime |
 | `keel/shell.css` | The frameless shell: body as a fixed flex column, the header pinned, the window buttons | runtime |
+| `keel/release` | The preflight guards a release has to pass, plus the clean and the process stop | release time |
 
-More to come — storage adapter, release script. See [DECISIONS.md](DECISIONS.md)
-for the shape and the order.
+More to come — the storage adapter. See [DECISIONS.md](DECISIONS.md) for the
+shape and the order.
 
 ### `keel/shell.css`
 
@@ -64,6 +65,48 @@ plausible.
 exists because Nib referenced `--accent-soft` from a rule and never defined it,
 and CSS said nothing at all for weeks: a missing custom property is not an error,
 it is a rule that quietly does less than it says.
+
+### `keel/release`
+
+Four apps grew their own release script. Tend's and Brief's were the same 125
+lines apart from the app's name; Nib's was missing two guards and found out by
+publishing a release that did nothing and printed "Published"; Loom's guards a
+tag instead, because it releases from CI.
+
+The guards are the whole value of a release script — each one is a thing that
+went wrong once — so they are what this module shares. The middle is not shared,
+because the two paths genuinely differ:
+
+```js
+import { appMeta, clean, ghToken, nodeExec, preflight, stopRunningBuild } from 'keel/release'
+
+const exec = nodeExec(root)
+const { tag } = appMeta(root)
+
+// publish-from-here                          // or, for a tag-and-let-CI-build app:
+preflight(exec, { tag, checks: [              // checks: ['cleanTree', 'onBranch',
+  'cleanTree', 'notAlreadyReleased'           //          'nothingUnpushed', 'tagFree']
+] })
+```
+
+`preflight` returns **every** failure rather than the first: being told about a
+dirty tree, fixing it, and only then learning the version is already released is
+two round trips for one problem. An unknown check name throws instead of being
+skipped, because a guard silently lost to a typo is this module's own failure
+mode.
+
+`notAlreadyReleased` is the one to keep if you keep only one. Without it a
+release script runs to completion, prints "Published", and changes nothing:
+electron-builder treats a release older than two hours as untouchable, skips
+`latest.yml` with a notice in the middle of its output, and exits 0. The failure
+is shaped exactly like a success.
+
+`stopRunningBuild(folder)` clears the packaged processes holding files in
+`dist/`, matched on the **executable's path**. Never by name and never on a
+command-line flag: a filter on a Chromium flag once stopped 19 processes at once,
+because Chromium passes its flags down to every child it spawns. The spawn is
+injectable, which is how the test checks the match is narrow without stopping
+anything.
 
 ### `keel/window`
 

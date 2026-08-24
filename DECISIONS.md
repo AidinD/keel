@@ -2,6 +2,64 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-08-24 — `keel/release`: share the guards, not the release
+
+The fourth module. Four apps had a release script and none of them had the same
+set of checks.
+
+**The evidence, before deciding anything.** Tend's and Brief's scripts were the
+same 125 lines apart from the app's name — including a byte-identical
+`stop-running-build.mjs` beside each. Nib's was missing the dirty-tree check
+entirely and, until 2026-08-24, the already-released check too; it found out by
+publishing a release that did nothing and printed "Published". Loom's is a
+different shape again, because it releases by pushing a tag and letting CI build.
+
+**So the module shares the guards and deliberately does not share the release.**
+There is no `release()` function. The two paths differ in the middle — build here
+and publish, or tag and let CI build — and a single entry point covering both
+would need a flag for every difference, which is how a shared thing becomes worse
+than four copies. What is common is the *checking*, and checking is where all four
+incidents live.
+
+**`preflight` returns every failure, not the first.** Being told about a dirty
+tree, fixing it, and only then learning the version is already released is two
+round trips for one problem. The old scripts all exited on the first failure;
+running the migrated Tend script against a real dirty tree reported both at once,
+which is a small thing that will save a minute every time.
+
+**An unknown check name throws.** `preflight(exec, { checks: ['cleanTre'] })` is
+an error, not a no-op. A guard silently lost to a typo is precisely the failure
+this module exists to prevent, and quietly skipping unknown names would reproduce
+it inside the thing meant to fix it.
+
+**`cleanTree` counts untracked files, which Loom's version did not.** Loom passed
+`--untracked-files=no`. That is the forgiving reading and the wrong one: a file
+the build reads but nobody committed is in the installer on this machine and
+absent everywhere else, which is the hardest kind of difference to explain later.
+The stricter default is the one that would have caught it.
+
+**`exec` is injected, the way electron is in `keel/window`.** Nineteen tests run
+without spawning git, gh or PowerShell — the fake is a map from `command arg arg`
+to stdout, where an `Error` value means a non-zero exit. That is also what makes
+the messages testable, and the messages are most of the value: each one names the
+incident behind its check.
+
+**`stopRunningBuild` matches on the executable's path, and the script is
+exported so a test can read it.** Never by process name, which would also close
+an installed copy, and never on a command-line flag: a filter on
+`remote-debugging-port` once stopped 19 processes at once, because Chromium passes
+its flags down to every child it spawns. `stopScript()` exists purely so a test
+can assert the filter mentions `ExecutablePath.StartsWith` and mentions neither
+`ProcessName` nor `CommandLine` — a dangerous helper whose narrowness is checked
+rather than commented.
+
+**Alternative rejected — one script in keel, invoked by each app.** A shared
+executable would have to know each app's build command, its output directories,
+whether it publishes or tags, and whether it runs tests first. Those are four
+different scripts wearing one name. Sharing the parts leaves each app's script
+readable as a description of how that app releases, which is what a person opening
+it actually wants to know.
+
 ## 2026-08-24 — `keel/shell.css`: the layout, and nothing that is taste
 
 The third module. `body` as a fixed flex column, the header pinned, one scrolling
@@ -291,3 +349,9 @@ have five-way duplication behind them. They are not here because the icon module
 had to prove the packaging approach first, and because the API will change once a
 brand-new app (Brief) is the third consumer — migrating five apps against a v1
 API and then changing it means doing the work twice.
+
+*Written 2026-08-23. Window chrome landed the same day, the shell stylesheet and
+the release module on 2026-08-24. The storage adapter is the one still open, and
+the reasoning above is why it is last: it is the module where the API question is
+real, because Jot's storage carries a watcher, an atomic write, a lock and a
+double-encoding repair that the others do not have.*
