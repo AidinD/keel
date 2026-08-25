@@ -172,13 +172,43 @@ function nibNames(dir) {
 }
 
 /**
+ * Terms no data source knows, read from beside the private data.
+ *
+ * An employer's name is not in anybody's roster, so it has to be written down
+ * somewhere - and the one place it must not be written down is a file in the
+ * repository it is protecting. That is the same mistake the derived terms exist
+ * to avoid, one level up, and the guard caught it in its own source on the first
+ * push.
+ *
+ * One term per line, `#` for a comment, missing file means no extra terms.
+ *
+ * @param {string} dir The Tend data directory.
+ * @returns {string[]}
+ */
+function extraTerms(dir) {
+  const file = join(dir, "private-terms.txt");
+  if (!existsSync(file)) {
+    return [];
+  }
+  try {
+    return readFileSync(file, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("#"));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * The terms to look for, and where they were learned from.
  *
  * Split into words as well as kept whole: a roster holds "Nadia Ohlsson" and a
  * comment leaks "Nadia".
  *
  * @param {object} [opts]
- * @param {string[]} [opts.extra] Terms no data source knows, such as an employer.
+ * @param {string[]} [opts.extra] Terms from a caller. Prefer the file beside the
+ *   data - anything passed here has to be written down in a repository.
  * @returns {{ terms: string[], sources: string[] }}
  */
 export function privateTerms({ extra = [] } = {}) {
@@ -203,6 +233,12 @@ export function privateTerms({ extra = [] } = {}) {
   if (folders.length > 0) {
     sources.push(`${nib} (${folders.length} folders)`);
     raw.push(...folders);
+  }
+
+  const alsoTheirs = extraTerms(tend);
+  if (alsoTheirs.length > 0) {
+    sources.push(`${join(tend, "private-terms.txt")} (${alsoTheirs.length} terms)`);
+    raw.push(...alsoTheirs);
   }
 
   raw.push(...extra);

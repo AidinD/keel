@@ -45,7 +45,8 @@ export declare const MIN_TERM = 4;
  * comment leaks "Nadia".
  *
  * @param {object} [opts]
- * @param {string[]} [opts.extra] Terms no data source knows, such as an employer.
+ * @param {string[]} [opts.extra] Terms from a caller. Prefer the file beside the
+ *   data - anything passed here has to be written down in a repository.
  * @returns {{ terms: string[], sources: string[] }}
  */
 export declare function privateTerms({ extra }?: {

@@ -23,8 +23,13 @@
  * Skip one push with: git push --no-verify
  */
 
-// Things no data source knows about: the employer, and the ways it gets written.
-const EXTRA = ["the studio", "thestudio", "TheStudio"];
+/*
+ * Nothing is named here. Terms that no roster knows - an employer, a client -
+ * go in `private-terms.txt` beside the Tend data, one per line. Writing them in
+ * this file would put them in every repository this hook protects, which is the
+ * mistake the derived terms exist to prevent; the guard caught exactly that in
+ * its own source on the first push.
+ */
 
 /**
  * Loaded dynamically so a clone where `npm install` has not run reports rather
@@ -46,7 +51,7 @@ try {
 
 let result;
 try {
-  result = privacy.checkOutgoing({ extra: EXTRA });
+  result = privacy.checkOutgoing();
 } catch (error) {
   // A guard that breaks the push when the guard itself is broken is a guard
   // that gets deleted. Say so loudly and let the push through.
