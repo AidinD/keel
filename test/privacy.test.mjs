@@ -124,3 +124,43 @@ test('the report names the term and the file, and says how to proceed', () => {
   assert.match(text, /Invented/)
   assert.match(text, /--no-verify/, 'a guard with no way past it gets disabled rather than obeyed')
 })
+
+test('punctuation inside an identifier is not a word break', () => {
+  // The first version treated a dot and a hyphen as boundaries, so a project
+  // named after an HTML tag matched `import.meta`, `.row-meta` and `row_meta` in
+  // every file in the suite: 284 hits in one repository, none a leak. A guard
+  // that noisy gets ignored, which is worse than not having it.
+  assert.deepEqual(findTerms('const here = dirname(fileURLToPath(import.meta.url))', ['Meta']), [])
+  assert.deepEqual(findTerms('.row-meta { color: red }', ['Meta']), [])
+  assert.deepEqual(findTerms('const row_meta = 1', ['Meta']), [])
+  assert.equal(findTerms('shipped it to Meta today', ['Meta']).length, 1, 'a real mention still lands')
+})
+
+test('a multi-word Nib folder is a book, not a person', () => {
+  // "Manager's Path" split into words contributed `Path`, which is in almost
+  // every source file ever written. Sub-folders only, and only single words.
+  const dir = mkdtempSync(join(tmpdir(), 'keel-privacy-books-'))
+  try {
+    writeFileSync(
+      join(dir, 'index.json'),
+      JSON.stringify({
+        categories: [
+          {
+            name: 'Books',
+            subs: [{ name: "Somebody's Long Book Title" }, { name: 'Onewordname' }]
+          }
+        ]
+      })
+    )
+    process.env.NIB_DATA_DIR = dir
+    process.env.TEND_DATA_DIR = join(dir, 'nothing-here')
+    const { terms } = privateTerms()
+    assert.ok(terms.includes('Onewordname'), 'a name-shaped folder is still a term')
+    assert.ok(!terms.includes('Title'), 'a book title must not contribute ordinary words')
+    assert.ok(!terms.includes('Book'))
+  } finally {
+    delete process.env.NIB_DATA_DIR
+    delete process.env.TEND_DATA_DIR
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

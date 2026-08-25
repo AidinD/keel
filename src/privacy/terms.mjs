@@ -58,7 +58,20 @@ const ALLOWED = new Set([
   "documents",
   "projects",
   "people",
-  "personal"
+  "personal",
+  // Turned up by the first full scan as terms, and every one of them was a
+  // folder named after something public - a book, a shelf, a template set.
+  "path",
+  "manager",
+  "friends",
+  "influence",
+  "templates",
+  // A project named after an HTML tag. `<meta charset>`, `const meta of`, a
+  // "meta row" in prose - the word is unavoidable in any web codebase, and
+  // thirty false positives per repository would get this whole guard ignored.
+  // Stated rather than silently dropped: THIS ONE NAME IS NOT PROTECTED HERE.
+  // Care is the only control for it, which is exactly why it is written down.
+  "meta"
 ]);
 
 /**
@@ -145,7 +158,21 @@ function tendNames(dir) {
 }
 
 /**
- * Every folder name in Nib, which is where the people and projects appear again.
+ * The name-shaped sub-folders in Nib.
+ *
+ * Sub-folders only, and only single words. A notebook's categories are `Books`,
+ * `Projects`, `Documents` - vocabulary, not people - and its sub-folders are a
+ * mix: one person per folder in some, one book per folder in others. A book
+ * title is not private, and treating it as private is actively harmful: the
+ * first version of this read every folder name and split it into words, so
+ * "Manager's Path" contributed `Path`, which appears in almost every source file
+ * ever written. The scan came back with 284 hits in one repository and nothing
+ * in it was a leak.
+ *
+ * A guard that cries wolf is bypassed within a week, so precision here matters
+ * more than reach. The one thing this misses - a multi-word private name that
+ * exists only in Nib - goes in `private-terms.txt`, which is what that file is
+ * for.
  *
  * @param {string} dir
  * @returns {string[]}
@@ -160,9 +187,11 @@ function nibNames(dir) {
     /** @type {string[]} */
     const found = [];
     for (const category of parsed.categories ?? []) {
-      found.push(String(category.name ?? ""));
       for (const sub of category.subs ?? []) {
-        found.push(String(sub.name ?? ""));
+        const name = String(sub.name ?? "").trim();
+        if (name !== "" && !/[\s'".:,\-]/.test(name)) {
+          found.push(name);
+        }
       }
     }
     return found;
@@ -258,9 +287,18 @@ export function privateTerms({ extra = [] } = {}) {
 /**
  * Where a term appears in some text.
  *
- * Word boundaries, so "Meta" does not match "metadata" and a name does not match
- * a longer word containing it. Case-insensitive, because a fixture id is
- * lowercase and leaks just as well.
+ * A boundary here is not the regex kind. In code a dot, a hyphen and an
+ * underscore sit INSIDE a name rather than ending one: `import.meta`,
+ * `.row-meta` and `row_meta` are each a single identifier, and treating that
+ * punctuation as a word break made a project named after a common word match
+ * every source file in the suite - forty-four hits in one repository, none of
+ * them a leak.
+ *
+ * The cost is a leak written as `project-meta` going unseen, and it is worth
+ * paying. The names that matter most are people, and a person's name does not
+ * turn up inside an identifier by accident.
+ *
+ * Case-insensitive, because a fixture id is lowercase and leaks just as well.
  *
  * @param {string} text
  * @param {string[]} terms
@@ -271,7 +309,7 @@ export function findTerms(text, terms) {
   const hits = [];
   const lines = text.split("\n");
   for (const term of terms) {
-    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escape(term)}(?![\\p{L}\\p{N}])`, "iu");
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}_.-])${escape(term)}(?![\\p{L}\\p{N}_.-])`, "iu");
     lines.forEach((line, index) => {
       if (pattern.test(line)) {
         hits.push({ term, line: index + 1, text: line.trim().slice(0, 120) });

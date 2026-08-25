@@ -58,9 +58,18 @@ export declare function privateTerms({ extra }?: {
 /**
  * Where a term appears in some text.
  *
- * Word boundaries, so "Meta" does not match "metadata" and a name does not match
- * a longer word containing it. Case-insensitive, because a fixture id is
- * lowercase and leaks just as well.
+ * A boundary here is not the regex kind. In code a dot, a hyphen and an
+ * underscore sit INSIDE a name rather than ending one: `import.meta`,
+ * `.row-meta` and `row_meta` are each a single identifier, and treating that
+ * punctuation as a word break made a project named after a common word match
+ * every source file in the suite - forty-four hits in one repository, none of
+ * them a leak.
+ *
+ * The cost is a leak written as `project-meta` going unseen, and it is worth
+ * paying. The names that matter most are people, and a person's name does not
+ * turn up inside an identifier by accident.
+ *
+ * Case-insensitive, because a fixture id is lowercase and leaks just as well.
  *
  * @param {string} text
  * @param {string[]} terms
