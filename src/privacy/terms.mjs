@@ -1,0 +1,251 @@
+/**
+ * The words that must never reach a public repository, worked out rather than
+ * listed.
+ *
+ * ## Why there is no list in the repo
+ *
+ * The obvious implementation is a deny-list file next to the hook. It cannot be:
+ * a file naming every colleague, committed to the repository it is protecting,
+ * IS the leak. Any list has to live outside the tree, and a list outside the
+ * tree is a list that drifts out of date the first time somebody joins.
+ *
+ * So the terms are derived from the private data these apps already hold. The
+ * names that must not appear are exactly the ones in Tend's roster and Nib's
+ * folders, and those directories are already outside every repository - that is
+ * the whole reason `TEND_DATA_DIR` and `NIB_DATA_DIR` exist. Nothing to
+ * maintain, nothing secret committed, and a person added tonight is protected
+ * before they can be leaked.
+ *
+ * ## Why a rule was not enough
+ *
+ * There was one, in a project document and in an agent's memory, and it was
+ * broken fifteen times in a single evening while writing test fixtures at speed.
+ * A rule that depends on somebody remembering is a reminder, not a control. This
+ * runs on every push whether anybody remembers or not.
+ *
+ * ## What it deliberately does not do
+ *
+ * Judge. It reports what it found and where; deciding whether "Meta" in a
+ * sentence about metadata is a leak is not something a substring match can do,
+ * and a guard that cries wolf gets bypassed with `--no-verify` within a week.
+ * Hence the length floor and the word boundaries.
+ */
+
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * Shorter than this and a name is a substring of ordinary prose.
+ *
+ * Four is the smallest that is not "Bo", "Ida" or "Ali" matching every third
+ * line. A short first name is the one case this cannot cover, and saying so is
+ * better than a guard nobody trusts.
+ */
+export const MIN_TERM = 4;
+
+/**
+ * Words that are never a leak however they appear, because they are the app's
+ * own vocabulary.
+ */
+const ALLOWED = new Set([
+  "team",
+  "work",
+  "books",
+  "notes",
+  "private",
+  "documents",
+  "projects",
+  "people",
+  "personal"
+]);
+
+/**
+ * A user environment variable, read from where Windows keeps it.
+ *
+ * Same reason the apps themselves do this: `process.env` only carries what was
+ * inherited, and a hook runs from whatever shell git happened to use.
+ *
+ * @param {string} name
+ * @returns {string | null}
+ */
+function stored(name) {
+  if (process.platform !== "win32") {
+    return null;
+  }
+  try {
+    const out = execFileSync("reg", ["query", "HKCU\\Environment", "/v", name], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const match = /\s{2,}REG_(?:EXPAND_)?SZ\s{2,}(.+)/.exec(out);
+    const value = match?.[1]?.trim() ?? "";
+    return value === "" ? null : value.replace(/%([^%]+)%/g, (_, key) => process.env[key] ?? "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} name
+ * @param {string} fallback
+ * @returns {string}
+ */
+function dataDir(name, fallback) {
+  return process.env[name]?.trim() || stored(name) || fallback;
+}
+
+/**
+ * Every name Tend knows: people and projects, in every mode it has a store for.
+ *
+ * Reduced from the event log by hand rather than by importing Tend, so this stays
+ * usable from a hook in any repository without depending on one app's source.
+ *
+ * @param {string} dir
+ * @returns {string[]}
+ */
+function tendNames(dir) {
+  const events = join(dir, "events");
+  if (!existsSync(events)) {
+    return [];
+  }
+  /** @type {string[]} */
+  const found = [];
+  for (const file of readdirSync(events)) {
+    if (!file.endsWith(".jsonl")) {
+      continue;
+    }
+    let text = "";
+    try {
+      text = readFileSync(join(events, file), "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n")) {
+      if (line.trim() === "") {
+        continue;
+      }
+      // Only the two collections that carry a human or a product name. A note
+      // or a promise is prose and would flood this with ordinary words.
+      if (!/"(people|projects)\.(create|update)"/.test(line)) {
+        continue;
+      }
+      try {
+        const name = JSON.parse(line)?.p?.name;
+        if (typeof name === "string") {
+          found.push(name);
+        }
+      } catch {
+        // A half-written line during a sync. Skipped, like every other reader.
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Every folder name in Nib, which is where the people and projects appear again.
+ *
+ * @param {string} dir
+ * @returns {string[]}
+ */
+function nibNames(dir) {
+  const index = join(dir, "index.json");
+  if (!existsSync(index)) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(index, "utf8").replace(/^﻿/, ""));
+    /** @type {string[]} */
+    const found = [];
+    for (const category of parsed.categories ?? []) {
+      found.push(String(category.name ?? ""));
+      for (const sub of category.subs ?? []) {
+        found.push(String(sub.name ?? ""));
+      }
+    }
+    return found;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The terms to look for, and where they were learned from.
+ *
+ * Split into words as well as kept whole: a roster holds "Nadia Ohlsson" and a
+ * comment leaks "Nadia".
+ *
+ * @param {object} [opts]
+ * @param {string[]} [opts.extra] Terms no data source knows, such as an employer.
+ * @returns {{ terms: string[], sources: string[] }}
+ */
+export function privateTerms({ extra = [] } = {}) {
+  const home = homedir();
+  const tend = dataDir("TEND_DATA_DIR", join(home, "AppData", "Roaming", "tend"));
+  const nib = dataDir("NIB_DATA_DIR", join(home, "AppData", "Roaming", "nib"));
+
+  /** @type {string[]} */
+  const sources = [];
+  /** @type {string[]} */
+  const raw = [];
+
+  for (const dir of [tend, `${tend.replace(/[\\/]+$/, "")}-private`]) {
+    const names = tendNames(dir);
+    if (names.length > 0) {
+      sources.push(`${dir} (${names.length} names)`);
+      raw.push(...names);
+    }
+  }
+
+  const folders = nibNames(nib);
+  if (folders.length > 0) {
+    sources.push(`${nib} (${folders.length} folders)`);
+    raw.push(...folders);
+  }
+
+  raw.push(...extra);
+
+  const terms = new Set();
+  for (const value of raw) {
+    for (const word of String(value).split(/[^\p{L}\p{N}]+/u)) {
+      if (word.length >= MIN_TERM && !ALLOWED.has(word.toLowerCase())) {
+        terms.add(word);
+      }
+    }
+  }
+
+  return { terms: [...terms].sort((a, b) => b.length - a.length), sources };
+}
+
+/**
+ * Where a term appears in some text.
+ *
+ * Word boundaries, so "Meta" does not match "metadata" and a name does not match
+ * a longer word containing it. Case-insensitive, because a fixture id is
+ * lowercase and leaks just as well.
+ *
+ * @param {string} text
+ * @param {string[]} terms
+ * @returns {{ term: string, line: number, text: string }[]}
+ */
+export function findTerms(text, terms) {
+  /** @type {{ term: string, line: number, text: string }[]} */
+  const hits = [];
+  const lines = text.split("\n");
+  for (const term of terms) {
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escape(term)}(?![\\p{L}\\p{N}])`, "iu");
+    lines.forEach((line, index) => {
+      if (pattern.test(line)) {
+        hits.push({ term, line: index + 1, text: line.trim().slice(0, 120) });
+      }
+    });
+  }
+  return hits;
+}
+
+/** @param {string} value */
+function escape(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

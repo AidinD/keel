@@ -1,6 +1,6 @@
 {
   "name": "keel",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "The shared layer under Aidin's desktop suite: icon pipeline, window chrome, shell CSS, release guards, storage primitives, credential reads.",
   "license": "MIT",
   "type": "module",
@@ -17,6 +17,10 @@
       "types": "./types/icon/index.d.mts",
       "default": "./src/icon/index.mjs"
     },
+    "./privacy": {
+      "types": "./types/privacy/index.d.mts",
+      "default": "./src/privacy/index.mjs"
+    },
     "./release": {
       "types": "./types/release/index.d.mts",
       "default": "./src/release/index.mjs"
@@ -29,6 +33,7 @@
       "types": "./types/shell/index.d.mts",
       "default": "./src/shell/index.mjs"
     },
+    "./shell.css": "./src/shell/shell.css",
     "./storage": {
       "types": "./types/storage/index.d.mts",
       "default": "./src/storage/index.mjs"
@@ -36,8 +41,7 @@
     "./window": {
       "types": "./types/window/index.d.mts",
       "default": "./src/window/index.mjs"
-    },
-    "./shell.css": "./src/shell/shell.css"
+    }
   },
   "files": [
     "src",

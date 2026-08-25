@@ -31,6 +31,15 @@ const SIBLINGS = ['jot', 'nib', 'loom', 'helm', 'tend', 'brief', 'nudge', 'pompo
 
 const canonicalGuard = readFileSync(join(keel, 'hooks', 'no-leaky-assets.mjs'), 'utf8')
 
+/*
+ * The privacy guard, rolled out 2026-08-25 after real colleague and project
+ * names reached a public repository through test fixtures. Pinned here for the
+ * same reason as the asset guard: the previous rollout of a hook reached seven
+ * of nine repos and nobody noticed the two it missed for a day.
+ */
+const canonicalPrivacy = readFileSync(join(keel, 'hooks', 'no-private-names.mjs'), 'utf8')
+const canonicalPrePush = readFileSync(join(keel, 'hooks', 'pre-push'), 'utf8')
+
 /** Siblings that are actually on this disk. */
 const present = SIBLINGS.filter((name) => existsSync(join(tools, name, 'package.json')))
 
@@ -124,3 +133,42 @@ test('every sibling ignores the directories that leak', () => {
   }
   assert.deepEqual(bad, [], `add to .gitignore: ${bad.join(' | ')}`)
 })
+
+test('every sibling on this disk carries the privacy guard, byte for byte', () => {
+  const drifted = present.filter((name) => {
+    const path = join(tools, name, '.githooks', 'no-private-names.mjs')
+    return !existsSync(path) || readFileSync(path, 'utf8') !== canonicalPrivacy
+  })
+  assert.deepEqual(drifted, [], 'these siblings are missing the privacy guard or have an old copy')
+})
+
+test('and a pre-push hook that runs it first', () => {
+  // First, so nothing has a side effect before a refusal.
+  const wrong = present.filter((name) => {
+    const path = join(tools, name, '.githooks', 'pre-push')
+    if (!existsSync(path)) {
+      return true
+    }
+    const body = readFileSync(path, 'utf8')
+    const lines = meaningful(body)
+    return lines[0] !== 'node .githooks/no-private-names.mjs || exit 1'
+  })
+  assert.deepEqual(wrong, [], 'these siblings have no pre-push hook, or run something before the guard')
+})
+
+test('the canonical pre-push runs the guard and nothing else first', () => {
+  assert.equal(meaningful(canonicalPrePush)[0], 'node .githooks/no-private-names.mjs || exit 1')
+})
+
+/**
+ * A shell script's lines with the blanks and the comments taken out.
+ *
+ * @param {string} body
+ * @returns {string[]}
+ */
+function meaningful(body) {
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'))
+}
