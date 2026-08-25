@@ -1,6 +1,6 @@
 {
   "name": "keel",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "The shared layer under Aidin's desktop suite: icon pipeline, window chrome, shell CSS, release guards, storage primitives, credential reads.",
   "license": "MIT",
   "type": "module",
@@ -48,8 +48,9 @@
     "types"
   ],
   "scripts": {
-    "test": "node --test \"test/**/*.test.mjs\"",
+    "audit:privacy": "node scripts/audit-private-terms.mjs",
     "prepare": "git config core.hooksPath .githooks",
+    "test": "node --test \"test/**/*.test.mjs\"",
     "types": "tsc"
   },
   "devDependencies": {
