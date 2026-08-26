@@ -211,6 +211,13 @@ function nibNames(dir) {
  *
  * One term per line, `#` for a comment, missing file means no extra terms.
  *
+ * This is also where a name goes when it must be protected FOREVER rather than
+ * while it happens to be in the data. Derivation is self-maintaining in one
+ * direction only: a person added tonight is covered before they can be leaked,
+ * and a person whose folder is deleted stops being covered even though the
+ * person is still real and their name still must not appear. Five names went
+ * that way on the first day this existed, unnoticed until a term count dropped.
+ *
  * @param {string} dir The Tend data directory.
  * @returns {string[]}
  */
