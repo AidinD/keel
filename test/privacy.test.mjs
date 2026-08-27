@@ -136,6 +136,48 @@ test('punctuation inside an identifier is not a word break', () => {
   assert.equal(findTerms('shipped it to Meta today', ['Meta']).length, 1, 'a real mention still lands')
 })
 
+test('a folder named after an everyday word is not turned into a term', () => {
+  /*
+   * A notes folder called Conversations, in an app whose subject is
+   * conversations. It sat in ninety-three lines of already-published source
+   * before it was ever flagged - the guard reads changed lines only, so it went
+   * unnoticed until one of those lines was edited, and then it blocked a push
+   * over prose that was already public.
+   *
+   * The allow-list is the honest answer and it is an admission, not a fix: those
+   * names are not protected. A guard that fires on a word this common is pushed
+   * past with --no-verify as a habit, and then it protects nothing at all.
+   */
+  const dir = mkdtempSync(join(tmpdir(), 'keel-privacy-everyday-'))
+  try {
+    writeFileSync(
+      join(dir, 'index.json'),
+      JSON.stringify({
+        categories: [
+          { name: 'Practice', subs: [{ name: 'Conversations' }, { name: 'Onewordname' }] }
+        ]
+      })
+    )
+    // Through the environment, which is the only seam there is - and the reason
+    // it matters here rather than being a detail: the first version of this test
+    // passed the directories as arguments, which `privateTerms` ignores, so it
+    // silently read the real notebook on this machine. A test that reads real
+    // private data to check a privacy guard is its own small joke.
+    process.env.NIB_DATA_DIR = dir
+    process.env.TEND_DATA_DIR = join(dir, 'nothing-here')
+    const { terms } = privateTerms()
+    const lower = terms.map((t) => t.toLowerCase())
+    assert.equal(lower.includes('conversations'), false, 'an everyday word became a protected term')
+    // The control. Without it the assertion above passes just as well when the
+    // derivation is broken and returns nothing at all.
+    assert.equal(lower.includes('onewordname'), true, 'a real name stopped being protected')
+  } finally {
+    delete process.env.NIB_DATA_DIR
+    delete process.env.TEND_DATA_DIR
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a multi-word Nib folder is a book, not a person', () => {
   // "Manager's Path" split into words contributed `Path`, which is in almost
   // every source file ever written. Sub-folders only, and only single words.

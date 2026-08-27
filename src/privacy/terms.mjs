@@ -71,7 +71,19 @@ const ALLOWED = new Set([
   // thirty false positives per repository would get this whole guard ignored.
   // Stated rather than silently dropped: THIS ONE NAME IS NOT PROTECTED HERE.
   // Care is the only control for it, which is exactly why it is written down.
-  "meta"
+  "meta",
+  // A notes folder named after its subject, in an app whose subject is
+  // conversations. It appeared ninety-three times in already-published source
+  // before it was ever flagged - the guard only reads changed lines, so it went
+  // unnoticed until one of those lines was edited, and then it blocked a push
+  // over ordinary prose that was already public.
+  //
+  // Same reasoning as `meta`, and the same admission: THIS WORD IS NOT PROTECTED
+  // HERE. A guard that fires on a word this common gets pushed past with
+  // --no-verify as a habit, and then it protects nothing at all - which is a
+  // worse outcome than one unprotected folder name.
+  "conversation",
+  "conversations"
 ]);
 
 /**
