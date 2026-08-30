@@ -41,6 +41,10 @@
     "./window": {
       "types": "./types/window/index.d.mts",
       "default": "./src/window/index.mjs"
+    },
+    "./whisper": {
+      "types": "./types/whisper/index.d.mts",
+      "default": "./src/whisper/index.mjs"
     }
   },
   "files": [
