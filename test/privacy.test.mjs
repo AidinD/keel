@@ -136,6 +136,40 @@ test('punctuation inside an identifier is not a word break', () => {
   assert.equal(findTerms('shipped it to Meta today', ['Meta']).length, 1, 'a real mention still lands')
 })
 
+test('a folder named Decisions does not protect the word "decisions"', () => {
+  /*
+   * Found the way the Conversations one was: a push refused over a JSON schema
+   * whose property is, correctly, `decisions` - in a suite where every project
+   * keeps a DECISIONS.md and the word is in prose, field names and commit
+   * messages constantly.
+   *
+   * Through the environment, because that is the only seam `privateTerms` has -
+   * the note above this test's neighbour explains what happens to anyone who
+   * passes directories as arguments instead.
+   */
+  const dir = mkdtempSync(join(tmpdir(), 'keel-privacy-decisions-'))
+  try {
+    writeFileSync(
+      join(dir, 'index.json'),
+      JSON.stringify({
+        categories: [{ name: 'Documents', subs: [{ name: 'Decisions' }, { name: 'Testperson' }] }]
+      })
+    )
+    process.env.NIB_DATA_DIR = dir
+    process.env.TEND_DATA_DIR = join(dir, 'nothing-here')
+    const { terms } = privateTerms()
+    const lower = terms.map((t) => t.toLowerCase())
+    assert.equal(lower.includes('decisions'), false, 'an everyday word became a protected term')
+    // The control, without which this passes against a derivation returning
+    // nothing at all.
+    assert.equal(lower.includes('testperson'), true, 'a real name stopped being protected')
+  } finally {
+    delete process.env.NIB_DATA_DIR
+    delete process.env.TEND_DATA_DIR
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a folder named after an everyday word is not turned into a term', () => {
   /*
    * A notes folder called Conversations, in an app whose subject is
