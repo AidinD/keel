@@ -200,11 +200,12 @@ const SEGMENT = /^\[(\d{2}:\d{2}:\d{2})\.\d{3} --> (\d{2}:\d{2}:\d{2})\.\d{3}\]\
  * @param {WhisperLanguage} args.language
  * @param {number} [args.seconds]       Length, for the progress fraction.
  * @param {(fraction: number) => void} [args.onProgress]
+ * @param {string[]} [args.roots]        Extra places to look - see whisperCandidates.
  * @param {NodeJS.ProcessEnv} [args.env]
  * @returns {Promise<{ segments: { start: string, end: string, text: string }[], text: string }>}
  */
-export function transcribe({ file, language, seconds = 0, onProgress, env = process.env }) {
-  const status = whisperStatus(language, { env })
+export function transcribe({ file, language, seconds = 0, onProgress, roots = [], env = process.env }) {
+  const status = whisperStatus(language, { env, roots })
   if (!status.ready) {
     return Promise.reject(new Error(status.why))
   }

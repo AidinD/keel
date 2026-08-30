@@ -125,14 +125,16 @@ export declare function whisperStatus(language: WhisperLanguage, options?: {
  * @param {WhisperLanguage} args.language
  * @param {number} [args.seconds]       Length, for the progress fraction.
  * @param {(fraction: number) => void} [args.onProgress]
+ * @param {string[]} [args.roots]        Extra places to look - see whisperCandidates.
  * @param {NodeJS.ProcessEnv} [args.env]
  * @returns {Promise<{ segments: { start: string, end: string, text: string }[], text: string }>}
  */
-export declare function transcribe({ file, language, seconds, onProgress, env }: {
+export declare function transcribe({ file, language, seconds, onProgress, roots, env }: {
     file: string;
     language: WhisperLanguage;
     seconds?: number;
     onProgress?: (fraction: number) => void;
+    roots?: string[];
     env?: NodeJS.ProcessEnv;
 }): Promise<{
     segments: {
