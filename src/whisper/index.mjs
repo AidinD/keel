@@ -213,6 +213,18 @@ export function transcribe({ file, language, seconds = 0, onProgress, roots = []
     return Promise.reject(new Error(status.why))
   }
 
+  /*
+   * A missing input file, checked here rather than left to the binary.
+   *
+   * whisper-cli answers an unopenable file by printing its entire usage text and
+   * exiting 2 - so the caller gets two hundred lines about VAD padding when what
+   * happened is that the audio is not there. Nib puts that message in the note,
+   * where it is worse than useless. This says the one true thing instead.
+   */
+  if (!existsSync(file)) {
+    return Promise.reject(new Error(`the audio file is gone: ${file}`))
+  }
+
   return new Promise((done, fail) => {
     const child = spawn(
       status.binary,
