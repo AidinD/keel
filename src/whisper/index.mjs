@@ -158,7 +158,8 @@ export function modelPath(language, options) {
  * @returns {{ ready: true, root: string, binary: string, model: string }
  *   | { ready: false, why: string, root: string, model?: string }}
  */
-export function whisperStatus(language, options) {
+export function whisperStatus(language, options = {}) {
+  const { env = process.env } = options
   const root = whisperRoot(options)
   const binary = binaryPath(options)
   if (!existsSync(binary)) {
@@ -168,7 +169,9 @@ export function whisperStatus(language, options) {
       why:
         `whisper-cli.exe is not in ${root}` +
         (looked.length > 1 ? ` (${looked.length} places tried)` : '') +
-        '. Point WHISPER_DIR at the folder holding Release/ and the models.',
+        (env.WHISPER_DIR
+          ? '. WHISPER_DIR is set to that path - point it somewhere else, or unset it to search the usual places.'
+          : '. Set WHISPER_DIR to the folder holding Release/ and the models.'),
       root
     }
   }
