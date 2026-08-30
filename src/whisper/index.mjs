@@ -32,6 +32,9 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 
 /** Model file per language. The names are what is actually on disk today. */
+/** @typedef {'sv' | 'en'} WhisperLanguage */
+
+/** @type {Record<WhisperLanguage, string>} */
 const MODELS = {
   sv: 'ggml-model-q5_0.bin',
   en: 'ggml-en.bin'
@@ -44,6 +47,10 @@ const MODELS = {
  * say so. Then the folder beside the checked-out repos, which is where they
  * belong: inside none of them, reachable from all of them.
  */
+/**
+ * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @returns {string}
+ */
 export function whisperRoot({ env = process.env } = {}) {
   const override = env.WHISPER_DIR?.trim()
   if (override) {
@@ -53,10 +60,19 @@ export function whisperRoot({ env = process.env } = {}) {
   return resolve(here, '..', '..', '..', '.whisper')
 }
 
+/**
+ * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @returns {string}
+ */
 export function binaryPath(options) {
   return join(whisperRoot(options), 'Release', 'whisper-cli.exe')
 }
 
+/**
+ * @param {WhisperLanguage} language
+ * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @returns {string}
+ */
 export function modelPath(language, options) {
   const name = MODELS[language]
   if (name === undefined) {
@@ -72,6 +88,12 @@ export function modelPath(language, options) {
  * the English model is missing" need different things from the person reading it,
  * and an app that only knows "unavailable" has to guess which to say.
  */
+/**
+ * @param {WhisperLanguage} language
+ * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @returns {{ ready: true, root: string, binary: string, model: string }
+ *   | { ready: false, why: string, root: string, model?: string }}
+ */
 export function whisperStatus(language, options) {
   const root = whisperRoot(options)
   const binary = binaryPath(options)
@@ -82,7 +104,7 @@ export function whisperStatus(language, options) {
   try {
     model = modelPath(language, options)
   } catch (error) {
-    return { ready: false, why: error.message, root }
+    return { ready: false, why: error instanceof Error ? error.message : String(error), root }
   }
   if (!existsSync(model)) {
     return { ready: false, why: `the ${language} model is not in ${root}`, root, model }
@@ -103,10 +125,10 @@ const SEGMENT = /^\[(\d{2}:\d{2}:\d{2})\.\d{3} --> (\d{2}:\d{2}:\d{2})\.\d{3}\]\
  *
  * @param {object} args
  * @param {string} args.file            Path to the WAV.
- * @param {'sv'|'en'} args.language
+ * @param {WhisperLanguage} args.language
  * @param {number} [args.seconds]       Length, for the progress fraction.
  * @param {(fraction: number) => void} [args.onProgress]
- * @param {object} [args.env]
+ * @param {NodeJS.ProcessEnv} [args.env]
  * @returns {Promise<{ segments: { start: string, end: string, text: string }[], text: string }>}
  */
 export function transcribe({ file, language, seconds = 0, onProgress, env = process.env }) {
@@ -132,11 +154,12 @@ export function transcribe({ file, language, seconds = 0, onProgress, env = proc
       { env, windowsHide: true }
     )
 
+    /** @type {{ start: string, end: string, text: string }[]} */
     const segments = []
     let stdout = ''
     let stderr = ''
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout.on('data', (/** @type {Buffer} */ chunk) => {
       stdout += chunk
       const lines = stdout.split('\n')
       stdout = lines.pop() ?? ''
@@ -152,12 +175,12 @@ export function transcribe({ file, language, seconds = 0, onProgress, env = proc
         }
       }
     })
-    child.stderr.on('data', (chunk) => {
+    child.stderr.on('data', (/** @type {Buffer} */ chunk) => {
       stderr += chunk
     })
 
     child.on('error', fail)
-    child.on('close', (code) => {
+    child.on('close', (/** @type {number | null} */ code) => {
       if (code !== 0) {
         fail(new Error(`whisper-cli exited ${code}: ${stderr.split('\n').slice(-4).join(' ').trim()}`))
         return
