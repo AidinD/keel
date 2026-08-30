@@ -48,20 +48,84 @@ const MODELS = {
  * belong: inside none of them, reachable from all of them.
  */
 /**
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
- * @returns {string}
+ * Everywhere the payload might be, best first.
+ *
+ * The first version walked three levels up from this file and returned that. It
+ * is right in a checkout - keel/src/whisper up to the folder holding every repo -
+ * and wrong in every installed app: packaged, this module sits inside
+ * `app.asar/node_modules/keel/src/whisper`, so the same walk points at
+ * `app.asar/node_modules/.whisper`, which does not exist and never will. Helm
+ * shipped that way for months and nobody noticed, because the person running it
+ * runs a checkout.
+ *
+ * So this answers with candidates and lets `whisperRoot` pick the one that is
+ * really there. The order is deliberate: an explicit setting, then whatever the
+ * app knows about itself, then where an installed app can keep 1.5GB, then the
+ * checkout.
+ *
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
+ * @returns {string[]}
  */
-export function whisperRoot({ env = process.env } = {}) {
-  const override = env.WHISPER_DIR?.trim()
-  if (override) {
-    return override
+export function whisperCandidates({ env = process.env, roots = [] } = {}) {
+  /** @type {string[]} */
+  const found = []
+  /** @param {string | undefined} path */
+  const add = (path) => {
+    if (typeof path === 'string' && path.trim().length > 0 && !found.includes(path)) {
+      found.push(path)
+    }
   }
-  // keel/src/whisper -> keel/src -> keel -> the folder holding every repo.
-  return resolve(here, '..', '..', '..', '.whisper')
+
+  add(env.WHISPER_DIR?.trim())
+  // Whatever the app itself knows - its own userData folder, typically. keel
+  // cannot work this out: it has no idea which app is asking.
+  for (const root of roots) {
+    add(root)
+  }
+  // Where an installed app can keep something this size without asking.
+  if (env.LOCALAPPDATA) {
+    add(join(env.LOCALAPPDATA, 'whisper'))
+  }
+  // The checkout layout: keel/src/whisper -> keel/src -> keel -> the repo folder.
+  add(resolve(here, '..', '..', '..', '.whisper'))
+  return found
 }
 
 /**
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * Where the binary and the models actually are.
+ *
+ * The first candidate that holds `whisper-cli.exe`; when none do, the first
+ * candidate anyway, so a caller has a path to name in its error. "Not in <path>"
+ * can be acted on and "not found" cannot.
+ *
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
+ * @returns {string}
+ */
+export function whisperRoot(options = {}) {
+  /*
+   * An explicit setting is the answer, right or wrong.
+   *
+   * Searching past a WHISPER_DIR that does not hold the engine would mean
+   * somebody points the app at a new folder, gets no error, and keeps using the
+   * old one - which is precisely the failure this suite spent a day chasing in
+   * two other apps. A wrong setting must produce a complaint about that setting,
+   * not a quiet fallback to a guess that happens to work on this machine.
+   */
+  const { env = process.env } = options
+  const explicit = env.WHISPER_DIR?.trim()
+  if (explicit) {
+    return explicit
+  }
+
+  const candidates = whisperCandidates(options)
+  const installed = candidates.find((candidate) =>
+    existsSync(join(candidate, 'Release', 'whisper-cli.exe'))
+  )
+  return installed ?? candidates[0] ?? ''
+}
+
+/**
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
  * @returns {string}
  */
 export function binaryPath(options) {
@@ -70,7 +134,7 @@ export function binaryPath(options) {
 
 /**
  * @param {WhisperLanguage} language
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
  * @returns {string}
  */
 export function modelPath(language, options) {
@@ -90,7 +154,7 @@ export function modelPath(language, options) {
  */
 /**
  * @param {WhisperLanguage} language
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
  * @returns {{ ready: true, root: string, binary: string, model: string }
  *   | { ready: false, why: string, root: string, model?: string }}
  */
@@ -98,7 +162,15 @@ export function whisperStatus(language, options) {
   const root = whisperRoot(options)
   const binary = binaryPath(options)
   if (!existsSync(binary)) {
-    return { ready: false, why: `whisper-cli.exe is not in ${root}`, root }
+    const looked = whisperCandidates(options)
+    return {
+      ready: false,
+      why:
+        `whisper-cli.exe is not in ${root}` +
+        (looked.length > 1 ? ` (${looked.length} places tried)` : '') +
+        '. Point WHISPER_DIR at the folder holding Release/ and the models.',
+      root
+    }
   }
   let model
   try {

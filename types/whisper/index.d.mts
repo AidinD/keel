@@ -32,26 +32,58 @@ export type WhisperLanguage = 'sv' | 'en';
  * belong: inside none of them, reachable from all of them.
  */
 /**
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * Everywhere the payload might be, best first.
+ *
+ * The first version walked three levels up from this file and returned that. It
+ * is right in a checkout - keel/src/whisper up to the folder holding every repo -
+ * and wrong in every installed app: packaged, this module sits inside
+ * `app.asar/node_modules/keel/src/whisper`, so the same walk points at
+ * `app.asar/node_modules/.whisper`, which does not exist and never will. Helm
+ * shipped that way for months and nobody noticed, because the person running it
+ * runs a checkout.
+ *
+ * So this answers with candidates and lets `whisperRoot` pick the one that is
+ * really there. The order is deliberate: an explicit setting, then whatever the
+ * app knows about itself, then where an installed app can keep 1.5GB, then the
+ * checkout.
+ *
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
+ * @returns {string[]}
+ */
+export declare function whisperCandidates({ env, roots }?: {
+    env?: NodeJS.ProcessEnv;
+    roots?: string[];
+}): string[];
+/**
+ * Where the binary and the models actually are.
+ *
+ * The first candidate that holds `whisper-cli.exe`; when none do, the first
+ * candidate anyway, so a caller has a path to name in its error. "Not in <path>"
+ * can be acted on and "not found" cannot.
+ *
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
  * @returns {string}
  */
-export declare function whisperRoot({ env }?: {
+export declare function whisperRoot(options?: {
     env?: NodeJS.ProcessEnv;
+    roots?: string[];
 }): string;
 /**
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
  * @returns {string}
  */
 export declare function binaryPath(options?: {
     env?: NodeJS.ProcessEnv;
+    roots?: string[];
 }): string;
 /**
  * @param {WhisperLanguage} language
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
  * @returns {string}
  */
 export declare function modelPath(language: WhisperLanguage, options?: {
     env?: NodeJS.ProcessEnv;
+    roots?: string[];
 }): string;
 /**
  * Whether transcription can run for a language, and if not, why.
@@ -62,12 +94,13 @@ export declare function modelPath(language: WhisperLanguage, options?: {
  */
 /**
  * @param {WhisperLanguage} language
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ env?: NodeJS.ProcessEnv, roots?: string[] }} [options]
  * @returns {{ ready: true, root: string, binary: string, model: string }
  *   | { ready: false, why: string, root: string, model?: string }}
  */
 export declare function whisperStatus(language: WhisperLanguage, options?: {
     env?: NodeJS.ProcessEnv;
+    roots?: string[];
 }): {
     ready: true;
     root: string;
