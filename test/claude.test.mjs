@@ -78,7 +78,7 @@ test('a structured answer comes back parsed', async () => {
   assert.equal(answer.costUsd, 0.01)
 })
 
-test('the call is stripped of tools and MCP servers', async () => {
+test('the call is stripped of tools, MCP servers and machine settings', async () => {
   /** @type {string[]} */
   let seen = []
   await ask({
@@ -92,8 +92,63 @@ test('the call is stripped of tools and MCP servers', async () => {
 
   assert.ok(seen.includes('--strict-mcp-config'), 'nothing should be inherited from the machine config')
   assert.equal(seen[seen.indexOf('--mcp-config') + 1], '{"mcpServers":{}}')
-  assert.equal(seen[seen.indexOf('--allowed-tools') + 1], '')
+  // The costly one. `--allowed-tools ''` only withholds permission to use tools
+  // that are still defined and still sent on every turn - roughly 24,000 tokens
+  // of them, measured, which was ten times the rest of the call.
+  assert.equal(seen[seen.indexOf('--tools') + 1], '')
+  assert.ok(!seen.includes('--allowed-tools'), 'a permission filter is not a way to not send the tools')
+  assert.equal(seen[seen.indexOf('--setting-sources') + 1], '', 'a machine effort setting must not price the call')
+  assert.ok(seen.includes('--no-session-persistence'), 'a one-shot question should leave no transcript')
   assert.ok(!seen.includes('--bare'), '--bare would force API-key auth instead of the subscription')
+})
+
+test('a system prompt is always sent, so the agent preamble never is', async () => {
+  /** @type {string[]} */
+  let seen = []
+  await ask({
+    prompt: 'anything',
+    model: 'test-model',
+    spawnImpl: (_path, args) => {
+      seen = args
+      return fakeChild({ stdout: cliJson({ result: 'fine' }) })
+    }
+  })
+
+  const sent = seen[seen.indexOf('--system-prompt') + 1]
+  assert.ok(typeof sent === 'string' && sent.length > 0, 'no system prompt means the whole agent preamble')
+  assert.ok(sent.length < 1_000, 'the default is a placeholder, not instructions of its own')
+})
+
+test('a caller with its own system prompt replaces the default rather than adding to it', async () => {
+  /** @type {string[]} */
+  let seen = []
+  await ask({
+    prompt: 'anything',
+    model: 'test-model',
+    system: 'You are a strict extractor.',
+    spawnImpl: (_path, args) => {
+      seen = args
+      return fakeChild({ stdout: cliJson({ result: 'fine' }) })
+    }
+  })
+
+  assert.equal(seen[seen.indexOf('--system-prompt') + 1], 'You are a strict extractor.')
+  assert.equal(seen.filter((arg) => arg === '--system-prompt').length, 1)
+})
+
+test('stdin is closed, because the CLI waits three seconds on an open one', async () => {
+  /** @type {any} */
+  let options
+  await ask({
+    prompt: 'anything',
+    model: 'test-model',
+    spawnImpl: (_path, _args, opts) => {
+      options = opts
+      return fakeChild({ stdout: cliJson({ result: 'fine' }) })
+    }
+  })
+
+  assert.deepEqual(options.stdio, ['ignore', 'pipe', 'pipe'])
 })
 
 test('it runs outside any project, so no CLAUDE.md is dragged into the question', async () => {

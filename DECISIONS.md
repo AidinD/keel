@@ -2,6 +2,44 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-08-31 - What a one-shot model call was actually paying for
+
+A consumer measured its own model buttons and found a single cheap-tier call with a one-sentence question and a two-field answer costing 8.8 cents, and a writing-tier call with the same size of question costing 32.9 cents.
+Shortening the requested answer from four paragraphs to three sentences moved the second one by 0.3 cents, which ruled out the answer and pointed at everything sent before it.
+A price like that is not an accounting detail: these apps print the cost under the answer, and a button that says 33 cents is a button nobody presses.
+
+**What the money was.** Four things, none of them the question.
+
+`--allowed-tools ''` does not stop the tool definitions being sent.
+It is a permission filter over tools that remain defined, so every built-in tool's schema went up with every turn - measured at roughly 24,000 tokens per turn, 48,000 over the three turns a structured call takes.
+`--tools ''` is the flag that removes them, and swapping one for the other took the measured cheap-tier call from 5.7 cents to 0.5 and the writing-tier one from 26 cents to 2.3.
+This module had claimed since it was written that the call carried no tools. It carried all of them.
+
+A call that passes no system prompt does not get a small one.
+It gets the whole agent preamble, around 23,000 tokens a turn, describing an agent with tools, files and a next turn - none of which a one-shot extraction has.
+It is also worse: on the same test question the preamble produced a false positive that the same model with a two-line system prompt did not.
+So a near-empty default is always sent now, and `system` replaces it rather than filling a hole.
+
+The machine's own settings priced the call too.
+An `effortLevel` in a user settings file applies to a spawned call like any other, so the same question cost whatever the person at that desk last chose for their interactive sessions: 5.6 cents against 2.3 on the measured writing-tier call.
+`--setting-sources ''` cuts it out and makes the price the same on every machine.
+
+And the CLI waits three seconds for piped input before concluding there is none, which an open, never-written stdin pipe pays on every single call.
+
+**What was rejected.** `--bare`, again and for the same reason as before: it forces API-key authentication, and the point of this module is that there is no second credential.
+Dropping `--json-schema` and asking for JSON in the prompt: it is genuinely cheaper, one turn instead of two, 0.29 cents against 0.53, because a structured answer is a tool call whose result gets fed back for a second turn.
+It was rejected anyway - the validation is the contract, and a parse of fenced JSON that usually works is the kind of thing that fails on the entry somebody actually wrote.
+Reusing a session across calls, to amortise the fixed context: there is nothing left to amortise once the tools are gone, and it would trade a stateless call for a stateful one.
+
+**The trade in `--setting-sources ''`.** An `apiKeyHelper` in a settings file is no longer read.
+These calls are the subscription's by design, so that is the intended direction, but a consumer that ever needs API-key authentication will find this flag in its way rather than a missing key.
+
+**What it costs now.** End to end through `ask`, the same two calls: 0.6 cents and 2.6 cents, against 8.8 and 32.9.
+What remains on the writing tier is the model thinking, which is the part that is doing the work; `effort` is the caller's lever on it.
+
+**Where the numbers came from.** Every figure above is a real call, read out of the CLI's own `usage` and `total_cost_usd`, one variable changed at a time, with the parent process's `CLAUDE_*` environment removed so a session's own settings could not leak into the measurement.
+That last point is worth keeping: `ask` passes the parent environment through, so an app launched from inside a Claude Code session inherits that session's effort setting.
+
 ## 2026-08-24 — Nudge and PomPom, and what the survey missed
 
 The package was declared complete with six consumers. Nudge and PomPom were in

@@ -14,11 +14,47 @@
  *
  * ## Why the call is stripped down
  *
- * A default invocation loads every MCP server on the machine and every tool
- * definition that comes with them. For a call that only emits JSON and never
- * uses a tool, that is the bulk of the tokens - in Helm, stripping them took a
- * small judging call from roughly $0.068 to $0.015. So: no tools, no MCP, and an
- * empty strict config so nothing is inherited.
+ * A default invocation is an agent session: every tool definition that ships
+ * with Claude Code, every MCP server configured on the machine, the preamble
+ * that explains all of it, and whatever the machine's own settings say about
+ * effort. For a call that only emits JSON and never uses a tool, that is almost
+ * the whole bill. Measured on one cheap-tier call with a one-sentence question
+ * and a two-field schema:
+ *
+ * | The call | Input tokens | Cost |
+ * |---|---|---|
+ * | tool definitions loaded | ~48,000 over 3 turns | 5.7 cents |
+ * | tool definitions gone | ~1,800 over 2 turns | 0.5 cents |
+ *
+ * `--allowed-tools ''` looks like the flag that does this and is not: it is a
+ * permission filter over tools that are still defined, so the definitions are
+ * still sent and still paid for on every turn. `--tools ''` is the one that
+ * removes them. The same swap took a writing-tier call from 26 cents to 2.3.
+ *
+ * The system prompt is the second half of the same problem. A call that passes
+ * none does not get a short prompt - it gets the full agent preamble, roughly
+ * 23,000 tokens a turn, which on the cheap tier costs several times the answer.
+ * It also answers worse, because the preamble describes an agent with tools and
+ * files and a one-shot extraction is neither. So a default one is always sent
+ * and `system` only replaces it.
+ *
+ * The machine's settings are the third. An `effortLevel` in a user settings file
+ * applies to a spawned call like any other, so the same question costs whatever
+ * the person at this desk last chose for their own interactive sessions - 5.6
+ * cents against 2.3 on the measured writing-tier call, for a setting the caller
+ * never asked for. `--setting-sources ''` cuts it out. The price of that flag is
+ * that an `apiKeyHelper` in a settings file is no longer read; these calls are
+ * the subscription's, so that is the intended trade, but it is the thing to
+ * remember if a consumer ever needs API-key auth.
+ *
+ * Nothing is written to disk either. Without `--no-session-persistence` every
+ * call leaves a full session transcript in the Claude Code projects directory,
+ * which for an app that asks about somebody's notes means a second copy of them
+ * somewhere the app does not manage.
+ *
+ * The CLI also waits three seconds for piped input before concluding there is
+ * none, so stdin is closed rather than left as an open pipe that never receives
+ * anything. Three seconds off every call, and nothing else changes.
  *
  * The working directory is part of the same problem and is easy to miss.
  * Claude Code loads the CLAUDE.md files it finds from the current directory
@@ -63,7 +99,10 @@ export type AskOptions = {
      */
     model: string;
     /**
-     * Replaces the system prompt entirely.
+     * Replaces the system prompt entirely. Given none, a
+     * near-empty default is sent rather than nothing, because nothing means Claude
+     * Code's full agent preamble - around 23,000 tokens a turn, on a call that has
+     * no tools and no next turn.
      */
     system?: string;
     effort?: "low" | "medium" | "high";
@@ -98,7 +137,10 @@ export type AskResult = {
  * @property {string} prompt What to ask. Everything the model needs, in one string.
  * @property {string} model Model id. The caller picks the tier; keel deliberately
  *   knows no model names, because that is the fact in this area that goes stale.
- * @property {string} [system] Replaces the system prompt entirely.
+ * @property {string} [system] Replaces the system prompt entirely. Given none, a
+ *   near-empty default is sent rather than nothing, because nothing means Claude
+ *   Code's full agent preamble - around 23,000 tokens a turn, on a call that has
+ *   no tools and no next turn.
  * @property {"low" | "medium" | "high"} [effort]
  * @property {Record<string, any>} [schema] JSON Schema. Given one, the answer is
  *   validated by the CLI and comes back parsed.
