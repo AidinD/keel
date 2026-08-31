@@ -14,7 +14,29 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import { whisperCandidates, whisperRoot, whisperStatus } from '../src/whisper/index.mjs'
+import {
+  parseSegment,
+  wavChannels,
+  whisperCandidates,
+  whisperRoot,
+  whisperStatus
+} from '../src/whisper/index.mjs'
+
+/** A WAV header, which is all `wavChannels` ever reads. */
+function wav(dir, name, { channels = 1, riff = 'RIFF', wave = 'WAVE', fmt = 'fmt ' } = {}) {
+  const header = Buffer.alloc(44)
+  header.write(riff, 0)
+  header.writeUInt32LE(36, 4)
+  header.write(wave, 8)
+  header.write(fmt, 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(channels, 22)
+  header.writeUInt32LE(16000, 24)
+  const path = join(dir, name)
+  writeFileSync(path, header)
+  return path
+}
 
 /** A folder that looks like an installed engine. */
 function payload(dir, { model = true } = {}) {
@@ -131,5 +153,84 @@ describe('what it reports when it cannot run', () => {
     const status = whisperStatus('de', { env: { WHISPER_DIR: whole } })
     assert.equal(status.ready, false)
     assert.match(status.why, /No whisper model for language/)
+  })
+})
+
+/*
+ * Reading the channel count off the file, rather than being told.
+ *
+ * Whether to ask whisper for speaker labels is a fact about the file: the folder
+ * holds recordings from before the app captured two channels and after it, and
+ * both get transcribed by the same call.
+ */
+describe('how many channels a file has', () => {
+  it('reads a mono header as one and a stereo header as two', () => {
+    assert.equal(wavChannels(wav(scratch, 'one.wav', { channels: 1 })), 1)
+    assert.equal(wavChannels(wav(scratch, 'two.wav', { channels: 2 })), 2)
+  })
+
+  it('answers 0 for a file that is not there', () => {
+    // A caller asking "is this stereo" wants a no, not an exception - the
+    // missing-file complaint belongs to `transcribe`, which says it properly.
+    assert.equal(wavChannels(join(scratch, 'nothing.wav')), 0)
+  })
+
+  it('answers 0 for something that is not a WAV at all', () => {
+    const path = join(scratch, 'not-a-wav.bin')
+    writeFileSync(path, Buffer.alloc(64, 7))
+    assert.equal(wavChannels(path), 0)
+  })
+
+  it('answers 0 when the header is too short to hold the answer', () => {
+    const path = join(scratch, 'truncated.wav')
+    writeFileSync(path, Buffer.from('RIFF'))
+    assert.equal(wavChannels(path), 0)
+  })
+
+  it('answers 0 when `fmt ` is not the first chunk', () => {
+    // The count is only at offset 22 in the layout this suite writes. A file
+    // with a LIST chunk in front of it would put something else there, and
+    // reading that as a channel count is worse than admitting ignorance.
+    assert.equal(wavChannels(wav(scratch, 'odd.wav', { channels: 2, fmt: 'LIST' })), 0)
+  })
+})
+
+/*
+ * What whisper-cli prints, parsed.
+ *
+ * The one part of this module a machine with no engine installed can still
+ * check - and the format has already moved once between builds.
+ */
+describe('reading a line of output', () => {
+  it('takes the timestamps and the words off a plain segment', () => {
+    const segment = parseSegment('[00:00:03.100 --> 00:00:06.000]  Hej och valkommen.')
+    assert.deepEqual(segment, { start: '00:00:03', end: '00:00:06', text: 'Hej och valkommen.' })
+  })
+
+  it('lifts the speaker out of the words rather than leaving it in them', () => {
+    const segment = parseSegment('[00:00:22.000 --> 00:00:24.000]  (speaker 1) om andra saker.')
+    assert.equal(segment?.speaker, '1')
+    assert.equal(segment?.text, 'om andra saker.')
+  })
+
+  it("keeps whisper's own doubt instead of resolving it", () => {
+    // `speaker ?` is the segment sitting across a turn, and it is the most
+    // honest thing in the output. Rounding it to a name would be a guess with
+    // somebody's name on it.
+    const segment = parseSegment('[00:00:24.000 --> 00:00:26.000]  (speaker ?) sa vi kan forsoka.')
+    assert.equal(segment?.speaker, '?')
+    assert.equal(segment?.text, 'sa vi kan forsoka.')
+  })
+
+  it('leaves speaker absent on a mono file rather than inventing one', () => {
+    // Absent and '?' mean different things: "there were no labels" against
+    // "there were, and this segment could not be told apart".
+    const segment = parseSegment('[00:00:00.000 --> 00:00:02.000]  Ingen etikett har.')
+    assert.equal('speaker' in (segment ?? {}), false)
+  })
+
+  it('ignores every line that is not a segment', () => {
+    assert.equal(parseSegment('whisper_init_from_file_with_params_no_state: loading model'), null)
+    assert.equal(parseSegment(''), null)
   })
 })

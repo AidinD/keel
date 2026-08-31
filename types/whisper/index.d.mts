@@ -22,6 +22,22 @@
  * specialised that it transcribes ENGLISH speech into Swedish words - measured,
  * not assumed: fed an English clip with `-l en` it returned Swedish. So the
  * language is not a flag on one model, it selects which model runs.
+ *
+ * ## Who said it, when the file can answer that
+ *
+ * A two-channel file is transcribed with `-di`, which labels each segment by
+ * which channel was louder. That is not voice recognition and does not pretend
+ * to be: it is bookkeeping over an input that was already kept apart - a
+ * microphone on the left, the machine's own output on the right - so the labels
+ * are as good as that separation was, and whisper says `speaker ?` rather than
+ * guessing when the two channels are level.
+ *
+ * It costs far less than transcribing two files: whisper mixes down to mono for
+ * the words and uses the stereo only for the label. Measured on a 50-second
+ * clip, 9.3s against 7.9s - eighteen percent, not double.
+ *
+ * A one-channel file gets no `-di` and no labels, which is what every recording
+ * made before this looks like.
  */
 export type WhisperLanguage = 'sv' | 'en';
 /**
@@ -113,12 +129,56 @@ export declare function whisperStatus(language: WhisperLanguage, options?: {
     model?: string;
 };
 /**
- * Transcribe one 16kHz mono WAV.
+ * How many channels a WAV holds, and 0 when the file cannot answer.
+ *
+ * Read from the header rather than taken on trust from the caller: whether to
+ * ask for speaker labels is a fact about the file, and a recording made before
+ * the app captured two channels is still sitting in the same folder as one made
+ * after. Passing `-di` to a mono file gets a warning and no labels, and NOT
+ * passing it to a stereo one silently throws away the only thing that knows who
+ * was talking.
+ *
+ * 0 on anything unreadable or unrecognised, so a caller that only asks "is this
+ * two channels" gets a no rather than an exception.
+ *
+ * @param {string} file
+ * @returns {number}
+ */
+export declare function wavChannels(file: string): number;
+/**
+ * One line of whisper-cli's output, or null when it is not a segment.
+ *
+ * Its own function so it can be tested without the 1.5GB payload the rest of
+ * this module needs. The output format is the thing most likely to move under
+ * us - it already has, between builds - and it is the one part of this that a
+ * machine with no engine installed can still check.
+ *
+ * The label comes off the words rather than staying in them. `(speaker 0)` is
+ * whisper's prefix and belongs to the segment, not to the sentence: left in the
+ * text it would be read aloud by a summary pass, hit by a reader searching for a
+ * word, and counted in every word count downstream.
+ *
+ * @param {string} line
+ * @returns {{ start: string, end: string, text: string, speaker?: string } | null}
+ */
+export declare function parseSegment(line: string): {
+    start: string;
+    end: string;
+    text: string;
+    speaker?: string;
+} | null;
+/**
+ * Transcribe one 16kHz WAV, mono or stereo.
  *
  * `onProgress` is called with a fraction as whisper reports its position, so a
  * long meeting can show something moving. It is derived from the timestamps in
  * the output rather than from whisper's own progress flag, which prints to
  * stderr in a format that has changed between builds.
+ *
+ * A stereo file also comes back labelled - see the note at the top of this file.
+ * `speaker` is `'0'` for the left channel, `'1'` for the right and `'?'` where
+ * whisper could not tell; it is absent entirely on a mono file, which is how a
+ * caller distinguishes "nobody said" from "it could not tell".
  *
  * @param {object} args
  * @param {string} args.file            Path to the WAV.
@@ -127,7 +187,7 @@ export declare function whisperStatus(language: WhisperLanguage, options?: {
  * @param {(fraction: number) => void} [args.onProgress]
  * @param {string[]} [args.roots]        Extra places to look - see whisperCandidates.
  * @param {NodeJS.ProcessEnv} [args.env]
- * @returns {Promise<{ segments: { start: string, end: string, text: string }[], text: string }>}
+ * @returns {Promise<{ segments: { start: string, end: string, text: string, speaker?: string }[], text: string }>}
  */
 export declare function transcribe({ file, language, seconds, onProgress, roots, env }: {
     file: string;
@@ -141,6 +201,7 @@ export declare function transcribe({ file, language, seconds, onProgress, roots,
         start: string;
         end: string;
         text: string;
+        speaker?: string;
     }[];
     text: string;
 }>;
