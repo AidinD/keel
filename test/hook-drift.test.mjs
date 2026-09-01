@@ -172,3 +172,31 @@ function meaningful(body) {
     .map((line) => line.trim())
     .filter((line) => line !== '' && !line.startsWith('#'))
 }
+
+test('keel protects itself, which it did not until 2026-09-01', () => {
+  /*
+   * The one repository this file never checked was the one it lives in.
+   *
+   * keel owns the canonical copies in hooks/, rolls them out to eight siblings and
+   * asserts every one of them byte for byte - and its own .githooks/ held the asset
+   * guard and no privacy guard at all. So the repository that defines the control was
+   * the only public repository without it, and this drift test could never have said
+   * so, because keel is not in SIBLINGS.
+   *
+   * Checked here against keel's own paths rather than by adding it to that list: the
+   * list is "siblings beside keel", and keel is not beside itself.
+   */
+  for (const file of ['no-private-names.mjs', 'pre-push', 'no-leaky-assets.mjs', 'pre-commit']) {
+    assert.ok(existsSync(join(keel, '.githooks', file)), `keel's own .githooks is missing ${file}`)
+  }
+  assert.equal(
+    readFileSync(join(keel, '.githooks', 'no-private-names.mjs'), 'utf8'),
+    canonicalPrivacy,
+    "keel's own copy has drifted from the canonical one it ships"
+  )
+  assert.equal(
+    readFileSync(join(keel, '.githooks', 'pre-push'), 'utf8'),
+    canonicalPrePush,
+    "keel's own pre-push has drifted from the canonical one it ships"
+  )
+})
