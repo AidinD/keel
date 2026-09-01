@@ -8,4 +8,4 @@
  * that would itself be the leak if committed.
  */
 export { MIN_TERM, findTerms, privateTerms } from "./terms.mjs";
-export { addedLines, checkOutgoing, isPublic, outgoingDiff, report } from "./check.mjs";
+export { addedLines, checkOutgoing, isPublic, outgoingDiff, outgoingMessages, parseMessages, report } from "./check.mjs";

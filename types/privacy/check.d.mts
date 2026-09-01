@@ -49,13 +49,44 @@ export declare function addedLines(diff: string): {
     text: string;
 }[];
 /**
+ * The messages of the commits about to be pushed.
+ *
+ * A separate read from the diff, because `git diff` does not contain them and never will -
+ * and that is the blind spot this project has already been bitten by. GITHUB-PUSH.md states
+ * it plainly: "Scrubbing file contents does not scrub commit messages, and the usual
+ * verification cannot see them. `git log -S` searches diffs, so a term that exists only in a
+ * message returns zero hits and the repo looks clean." An employer's domain sat in a public
+ * commit message that way.
+ *
+ * Found again on 2026-09-01, this time in the guard itself: a public repo carried a private
+ * first name in sixteen files AND in two commit messages, and this check could only ever have
+ * seen the first kind.
+ *
+ * Same ranges as the diff, and the same reason for each fallback.
+ *
+ * @param {string} cwd
+ * @returns {{ sha: string, text: string }[]}
+ */
+export declare function outgoingMessages(cwd: string): {
+    sha: string;
+    text: string;
+}[];
+/**
+ * @param {string} raw
+ * @returns {{ sha: string, text: string }[]}
+ */
+export declare function parseMessages(raw: string): {
+    sha: string;
+    text: string;
+}[];
+/**
  * Check what is about to be pushed. Returns what it found; decides nothing.
  *
  * @param {object} [opts]
  * @param {string} [opts.cwd]
  * @param {string[]} [opts.extra]
  * @returns {{ checked: boolean, why: string, sources: string[], terms: number,
- *   hits: { file: string, term: string, text: string }[] }}
+ *   hits: { file: string, term: string, text: string, kind: "file" | "message" }[] }}
  */
 export declare function checkOutgoing({ cwd, extra }?: {
     cwd?: string;
@@ -69,6 +100,7 @@ export declare function checkOutgoing({ cwd, extra }?: {
         file: string;
         term: string;
         text: string;
+        kind: "file" | "message";
     }[];
 };
 /**

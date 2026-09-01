@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { MIN_TERM, addedLines, findTerms, privateTerms, report } from '../src/privacy/index.mjs'
+import { MIN_TERM, addedLines, findTerms, outgoingMessages, parseMessages, privateTerms, report } from '../src/privacy/index.mjs'
 
 /*
  * The guard that replaced a rule.
@@ -239,4 +240,140 @@ test('a multi-word Nib folder is a book, not a person', () => {
     delete process.env.TEND_DATA_DIR
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+/*
+ * The half a diff cannot show.
+ *
+ * GITHUB-PUSH.md has warned about this since it was written: "Scrubbing file contents does
+ * not scrub commit messages, and the usual verification cannot see them. `git log -S`
+ * searches diffs, so a term that exists only in a message returns zero hits and the repo
+ * looks clean." An employer's domain reached a public repository exactly that way.
+ *
+ * The guard had the same blind spot. Found on 2026-09-01, in a public repo carrying a private
+ * first name in sixteen files AND in two commit messages: the check read `git diff` and only
+ * `git diff`, so it could see the first kind and never the second. Half a guard reads as a
+ * whole one, which is worse than none - a clean report is what somebody acts on.
+ */
+
+test('a commit message is parsed whole, blank lines and all', () => {
+  // \x1f between sha and body, \x1e between commits. A message contains newlines and blank
+  // lines, so anything that splits on those loses the body after the first paragraph - which
+  // is exactly where the explanation, and the name, tend to be.
+  const raw = [
+    'aaaaaaaaaaaa\x1fSubject line\n\nA body paragraph naming Someone.\n\x1e',
+    'bbbbbbbbbbbb\x1fAnother subject\n\x1e'
+  ].join('\n')
+  const parsed = parseMessages(raw)
+  assert.equal(parsed.length, 2)
+  assert.equal(parsed[0].sha, 'aaaaaaaaaaaa')
+  assert.match(parsed[0].text, /A body paragraph naming Someone\./)
+  assert.equal(parsed[1].sha, 'bbbbbbbbbbbb')
+})
+
+test('an empty log is no commits rather than one empty commit', () => {
+  assert.deepEqual(parseMessages(''), [])
+  assert.deepEqual(parseMessages('\n\n'), [])
+})
+
+test('a term in a message body is found, which is the case a diff can never carry', () => {
+  const parsed = parseMessages('cccccccccccc\x1fFix the thing\n\nSpotted while pairing with Karlsson.\n\x1e')
+  const hits = findTerms(parsed[0].text, ['Karlsson'])
+  assert.equal(hits.length, 1)
+  assert.match(hits[0].text, /pairing with Karlsson/)
+})
+
+test('the report tells somebody a message needs a rebase, not an edit', () => {
+  // Being told "rename it and push again" when the only hit is in a message sends somebody
+  // through a working tree that is already clean, and then they conclude the guard is wrong.
+  const text = report({
+    checked: true,
+    why: 'public',
+    sources: ['somewhere'],
+    terms: 1,
+    hits: [{ file: 'commit abc12345 (message)', term: 'Karlsson', text: 'pairing with Karlsson', kind: 'message' }]
+  })
+  assert.match(text, /COMMIT MESSAGE/)
+  assert.match(text, /--amend|rebase/)
+  // And it says why the usual check could not have found it.
+  assert.match(text, /log -S/)
+})
+
+test('a file-only hit is not told to rebase anything', () => {
+  const text = report({
+    checked: true,
+    why: 'public',
+    sources: ['somewhere'],
+    terms: 1,
+    hits: [{ file: 'src/x.js', term: 'Karlsson', text: 'const owner = "Karlsson"', kind: 'file' }]
+  })
+  assert.doesNotMatch(text, /COMMIT MESSAGE/)
+  assert.match(text, /Rename them and push again/)
+})
+
+test('outgoingMessages reads real commits, including a body below the subject', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'keel-privacy-msg-'))
+  const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' })
+  try {
+    git('init', '-q')
+    git('config', 'user.email', 'p@p')
+    git('config', 'user.name', 'p')
+    writeFileSync(join(repo, 'a.txt'), 'nothing private here\n')
+    git('add', '-A')
+    // The name is ONLY in the message. The diff is clean, which is the whole point.
+    git('commit', '-q', '-m', 'Tidy the thing\n\nAgreed this with Karlsson before starting.')
+
+    const messages = outgoingMessages(repo)
+    assert.ok(messages.length >= 1, 'a commit was read')
+    const all = messages.map((m) => m.text).join('\n')
+    assert.match(all, /Agreed this with Karlsson/)
+
+    // And prove the diff really is clean, so this is not passing for the wrong reason.
+    // Against the empty tree, because there is only one commit and HEAD~1 does not exist -
+    // the first version asked for it and failed on its own setup rather than on the code.
+    const empty = execFileSync('git', ['-C', repo, 'hash-object', '-t', 'tree', '/dev/null'], {
+      encoding: 'utf8'
+    }).trim()
+    const diff = execFileSync('git', ['-C', repo, 'diff', '--unified=0', empty, 'HEAD'], {
+      encoding: 'utf8'
+    })
+    assert.doesNotMatch(diff, /Karlsson/)
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+test('a name at the end of a sentence is found, which it was not until 2026-09-01', () => {
+  /*
+   * The hole that mattered most, and it was in the boundary rule rather than in
+   * anything grand. A dot counted as part of a word, so `with Karlsson.` matched
+   * nothing while `with Karlsson said` matched - and a name before a full stop is
+   * the single most ordinary way a person appears in prose or a commit message.
+   * The guard was blind to the common case and sharp on the rare one.
+   *
+   * Both directions are asserted, because the fix is only worth having if the
+   * noise it was protecting against stays gone: 284 false hits in one repository
+   * is what made the dot a word character in the first place.
+   */
+  const found = [
+    'pairing with Karlsson.',
+    'Karlsson, who reviewed it',
+    'with Karlsson!',
+    'see Karlsson (the reviewer)',
+    '- Karlsson',
+    'trailing off with Karlsson...'
+  ]
+  for (const line of found) {
+    assert.equal(findTerms(line, ['Karlsson']).length, 1, `should have found it in: ${line}`)
+  }
+
+  const quiet = ['karlsson.js', 'some-karlsson', 'row_karlsson', 'karlssonberg', 'x.karlsson.y']
+  for (const line of quiet) {
+    assert.deepEqual(findTerms(line, ['Karlsson']), [], `should have stayed quiet on: ${line}`)
+  }
+
+  // The original noise cases, unchanged - the reason the rule exists at all.
+  assert.deepEqual(findTerms('const here = dirname(fileURLToPath(import.meta.url))', ['Meta']), [])
+  assert.deepEqual(findTerms('.row-meta { color: red }', ['Meta']), [])
+  assert.equal(findTerms('shipped it to Meta.', ['Meta']).length, 1, 'and the sentence-final case works for any term')
 })

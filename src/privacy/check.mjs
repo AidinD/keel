@@ -96,13 +96,75 @@ export function addedLines(diff) {
 }
 
 /**
+ * The messages of the commits about to be pushed.
+ *
+ * A separate read from the diff, because `git diff` does not contain them and never will -
+ * and that is the blind spot this project has already been bitten by. GITHUB-PUSH.md states
+ * it plainly: "Scrubbing file contents does not scrub commit messages, and the usual
+ * verification cannot see them. `git log -S` searches diffs, so a term that exists only in a
+ * message returns zero hits and the repo looks clean." An employer's domain sat in a public
+ * commit message that way.
+ *
+ * Found again on 2026-09-01, this time in the guard itself: a public repo carried a private
+ * first name in sixteen files AND in two commit messages, and this check could only ever have
+ * seen the first kind.
+ *
+ * Same ranges as the diff, and the same reason for each fallback.
+ *
+ * @param {string} cwd
+ * @returns {{ sha: string, text: string }[]}
+ */
+export function outgoingMessages(cwd) {
+  /** @param {string[]} args */
+  const git = (args) =>
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+
+  // A unit separator between the sha and the body, and a record separator between commits:
+  // a message contains newlines and blank lines, so splitting on those loses half of it.
+  const format = "--format=%H%x1f%B%x1e";
+  for (const range of ["@{push}..HEAD", "origin/HEAD..HEAD", "HEAD~20..HEAD"]) {
+    try {
+      return parseMessages(git(["log", format, range]));
+    } catch {
+      // No upstream, no origin/HEAD, or fewer than twenty commits. Try the next.
+    }
+  }
+  try {
+    return parseMessages(git(["log", format, "-1"]));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * @param {string} raw
+ * @returns {{ sha: string, text: string }[]}
+ */
+export function parseMessages(raw) {
+  /** @type {{ sha: string, text: string }[]} */
+  const out = [];
+  for (const record of String(raw || "").split("\x1e")) {
+    const trimmed = record.replace(/^\s+/, "");
+    if (!trimmed) {
+      continue;
+    }
+    const sep = trimmed.indexOf("\x1f");
+    if (sep < 0) {
+      continue;
+    }
+    out.push({ sha: trimmed.slice(0, sep), text: trimmed.slice(sep + 1) });
+  }
+  return out;
+}
+
+/**
  * Check what is about to be pushed. Returns what it found; decides nothing.
  *
  * @param {object} [opts]
  * @param {string} [opts.cwd]
  * @param {string[]} [opts.extra]
  * @returns {{ checked: boolean, why: string, sources: string[], terms: number,
- *   hits: { file: string, term: string, text: string }[] }}
+ *   hits: { file: string, term: string, text: string, kind: "file" | "message" }[] }}
  */
 export function checkOutgoing({ cwd = process.cwd(), extra = [] } = {}) {
   const visibility = isPublic(cwd);
@@ -121,11 +183,19 @@ export function checkOutgoing({ cwd = process.cwd(), extra = [] } = {}) {
     };
   }
 
-  /** @type {{ file: string, term: string, text: string }[]} */
+  /** @type {{ file: string, term: string, text: string, kind: "file" | "message" }[]} */
   const hits = [];
   for (const line of addedLines(outgoingDiff(cwd))) {
     for (const found of findTerms(line.text, terms)) {
-      hits.push({ file: line.file, term: found.term, text: found.text });
+      hits.push({ file: line.file, term: found.term, text: found.text, kind: "file" });
+    }
+  }
+  // The half git diff cannot show. Tagged, because the two need different fixes: a file is
+  // edited, a message needs a rebase - and being told "it is in the diff" when it is not is
+  // how somebody concludes the guard is wrong and pushes anyway.
+  for (const commit of outgoingMessages(cwd)) {
+    for (const found of findTerms(commit.text, terms)) {
+      hits.push({ file: `commit ${commit.sha.slice(0, 8)} (message)`, term: found.term, text: found.text, kind: "message" });
     }
   }
 
@@ -170,7 +240,26 @@ export function report(result) {
     "",
     "These came from the names in your own Tend and Nib data, so this is not a",
     "guess about what looks like a name. Rename them and push again.",
-    "",
+    ""
+  );
+
+  // A message needs a different fix from a file, and saying "rename it and push again" to
+  // somebody whose only hit is in a commit message sends them looking through a working tree
+  // that is already clean - and then concluding the guard is broken.
+  if (result.hits.some((hit) => hit.kind === "message")) {
+    const n = result.hits.filter((hit) => hit.kind === "message").length;
+    lines.push(
+      `${n} of ${n === 1 ? "these is" : "these are"} in a COMMIT MESSAGE, not in a file. Editing the`,
+      "working tree will not touch it: the message needs rewording, with",
+      "`git commit --amend` for the last one or a rebase for an older one.",
+      "",
+      "This is the half `git log -S` cannot see - it searches diffs, so a term",
+      "that only ever lived in a message returns zero and the repo reads clean.",
+      ""
+    );
+  }
+
+  lines.push(
     "If one of them is genuinely a coincidence, push with --no-verify - but a",
     "coincidence in a test fixture usually means the fixture should be invented",
     "rather than borrowed.",

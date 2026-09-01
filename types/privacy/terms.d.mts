@@ -69,6 +69,24 @@ export declare function privateTerms({ extra }?: {
  * paying. The names that matter most are people, and a person's name does not
  * turn up inside an identifier by accident.
  *
+ * ## The full stop had to stop counting (2026-09-01)
+ *
+ * Treating `.` and `-` as part of a word cost far more than that paragraph
+ * knew. A dot ends a sentence at least as often as it joins an identifier, so
+ * `pairing with Karlsson.` matched NOTHING while `pairing with Karlsson said`
+ * matched - and a name at the end of a sentence is the single most common way a
+ * person appears in prose and in a commit message. The guard was blind to the
+ * ordinary case and sharp on the rare one.
+ *
+ * Found while extending this check to read commit messages, where a public
+ * repository turned out to carry a private first name in two of them.
+ *
+ * So the punctuation only joins when something joins to it: a dot or a hyphen
+ * followed by another letter or digit is still an identifier (`karlsson.js`,
+ * `row-meta`), and one followed by a space or a line end is punctuation. Same
+ * on the left, so `some-karlsson` stays a single identifier while `- Karlsson`
+ * in a list does not.
+ *
  * Case-insensitive, because a fixture id is lowercase and leaks just as well.
  *
  * @param {string} text
