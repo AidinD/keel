@@ -137,6 +137,38 @@ test('punctuation inside an identifier is not a word break', () => {
   assert.equal(findTerms('shipped it to Meta today', ['Meta']).length, 1, 'a real mention still lands')
 })
 
+test('a folder named Ownership does not protect the word "ownership"', () => {
+  /*
+   * The fourth of these, found the same way as the other three: a push refused over three
+   * lines of ordinary English in an orchestrator whose whole subject is which tier owns a
+   * piece of work - "a mate continues its own crew", "rather than on ownership". The same
+   * word had already been logged as a false positive across every hit of a full audit pass
+   * before it ever blocked anything.
+   *
+   * The control matters more than the assertion here: without it this passes against a
+   * derivation that returns nothing at all, which is what a broken guard looks like.
+   */
+  const dir = mkdtempSync(join(tmpdir(), 'keel-privacy-ownership-'))
+  try {
+    writeFileSync(
+      join(dir, 'index.json'),
+      JSON.stringify({
+        categories: [{ name: 'Documents', subs: [{ name: 'Ownership' }, { name: 'Testperson' }] }]
+      })
+    )
+    process.env.NIB_DATA_DIR = dir
+    process.env.TEND_DATA_DIR = join(dir, 'nothing-here')
+    const { terms } = privateTerms()
+    const lower = terms.map((t) => t.toLowerCase())
+    assert.equal(lower.includes('ownership'), false, 'an everyday word became a protected term')
+    assert.equal(lower.includes('testperson'), true, 'a real name stopped being protected')
+  } finally {
+    delete process.env.NIB_DATA_DIR
+    delete process.env.TEND_DATA_DIR
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a folder named Decisions does not protect the word "decisions"', () => {
   /*
    * Found the way the Conversations one was: a push refused over a JSON schema

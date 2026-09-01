@@ -93,7 +93,17 @@ const ALLOWED = new Set([
   // the field to dodge the guard would have made the code worse to read, which is
   // the trade that turns a guard into something people route around.
   "decision",
-  "decisions"
+  "decisions",
+  // A notes folder named Ownership, in a suite whose whole subject is which tier owns a
+  // piece of work. "a mate continues its own crew", "ownership applies the same way",
+  // "rather than on ownership" - three hits in one push, all of them ordinary English about
+  // exactly the thing the code does, and the same word was already logged as a false
+  // positive across all 29 hits of a full audit pass.
+  //
+  // Same admission as the three above: THIS WORD IS NOT PROTECTED HERE. The alternative was
+  // rewording prose to dodge the guard, and a guard people write around is one that stops
+  // being read.
+  "ownership"
 ]);
 
 /**
