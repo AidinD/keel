@@ -52,9 +52,24 @@
  * which for an app that asks about somebody's notes means a second copy of them
  * somewhere the app does not manage.
  *
- * The CLI also waits three seconds for piped input before concluding there is
- * none, so stdin is closed rather than left as an open pipe that never receives
- * anything. Three seconds off every call, and nothing else changes.
+ * ## The prompt goes in on stdin
+ *
+ * Not as `-p <prompt>`, which is where it used to go and which has a ceiling:
+ * Windows caps a command line at 32,767 characters, and `spawn` answers a longer
+ * one with `ENAMETOOLONG` before the process exists. Nib hit it on the first
+ * long meeting it summarised - a 53-minute transcript is around 40,000
+ * characters on its own - and the failure scales with exactly the input the
+ * feature is for. A 20-minute meeting worked, so nothing looked wrong until
+ * something was worth summarising.
+ *
+ * stdin has no such limit. Measured: 45,072 characters through it, exit 0, the
+ * schema still honoured. It also takes the prompt out of the shell's reach on
+ * the fallback path below, where a quoted argument was previously at the mercy
+ * of whatever the shell made of it.
+ *
+ * The pipe is closed the instant the prompt is written. The CLI waits three
+ * seconds for piped input before concluding there is none, and that wait is for
+ * an open pipe that never receives anything - an immediate EOF costs nothing.
  *
  * The working directory is part of the same problem and is easy to miss.
  * Claude Code loads the CLAUDE.md files it finds from the current directory
@@ -90,7 +105,9 @@ import { spawn } from 'node:child_process';
 export declare const DEFAULT_TIMEOUT_MS = 90000;
 export type AskOptions = {
     /**
-     * What to ask. Everything the model needs, in one string.
+     * What to ask. Everything the model needs, in one
+     * string. Sent on stdin, so there is no length limit to design around - a
+     * whole meeting transcript is a normal argument here.
      */
     prompt: string;
     /**
@@ -134,7 +151,9 @@ export type AskResult = {
 };
 /**
  * @typedef {object} AskOptions
- * @property {string} prompt What to ask. Everything the model needs, in one string.
+ * @property {string} prompt What to ask. Everything the model needs, in one
+ *   string. Sent on stdin, so there is no length limit to design around - a
+ *   whole meeting transcript is a normal argument here.
  * @property {string} model Model id. The caller picks the tier; keel deliberately
  *   knows no model names, because that is the fact in this area that goes stale.
  * @property {string} [system] Replaces the system prompt entirely. Given none, a
