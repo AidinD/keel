@@ -80,13 +80,61 @@ export declare function parseMessages(raw: string): {
     text: string;
 }[];
 /**
+ * How much of the repository a term has to already occupy before guarding it is hopeless.
+ *
+ * Both numbers have to be met. Occurrences alone would catch a single file that happens to
+ * repeat a real name twenty times - a leak, not vocabulary. Spread across several files is
+ * what says the word belongs to the codebase's own subject matter.
+ */
+export declare const PERVASIVE_MIN_HITS = 10;
+export declare const PERVASIVE_MIN_FILES = 3;
+/**
+ * Is this term already all over the published repository?
+ *
+ * The question this answers is not "is it private" but "can this gate still do anything about
+ * it". Four times now a push has been refused over a word that was already in the repository
+ * hundreds of times - `meta`, `conversation`, `decisions`, `ownership` - and each time the fix
+ * was to add the word to a hand-maintained list AFTER it had cost a push. The common thread
+ * was never how common the word is in English: `meta` is jargon and `ownership` is not a
+ * frequent word. It is that the word is the CODEBASE'S OWN vocabulary. `conversation`'s own
+ * note records the shape exactly: "It appeared ninety-three times in already-published source
+ * before it was ever flagged - the guard only reads changed lines, so it went unnoticed until
+ * one of those lines was edited."
+ *
+ * So the signal is measured rather than listed: count what is already committed.
+ *
+ * THE DANGEROUS CASE IS HANDLED BY REPORTING, NOT BY SILENCE. If a genuine private name is
+ * already in the repository ninety-three times, refusing the ninety-fourth protects nothing -
+ * the name is public, and what is needed is a history rewrite, not a blocked push. So a
+ * pervasive term is still surfaced, with its count, and the message says which of the two
+ * situations the reader is in. Dropping it quietly would be the version of this that hides a
+ * real leak, and that is the one thing this file must never do.
+ *
+ * Only ever called for a term that has already HIT, so a clean push pays nothing for it.
+ *
+ * @param {string} cwd
+ * @param {string} term
+ * @returns {{ pervasive: boolean, count: number, files: number }}
+ */
+export declare function alreadyInRepo(cwd: string, term: string): {
+    pervasive: boolean;
+    count: number;
+    files: number;
+};
+/**
  * Check what is about to be pushed. Returns what it found; decides nothing.
  *
  * @param {object} [opts]
  * @param {string} [opts.cwd]
  * @param {string[]} [opts.extra]
+ * `hits` is only what can still be guarded. A term the repository already publishes in force
+ * moves to `published` (with a count in `pervasive`) and does NOT block - see alreadyInRepo
+ * for why refusing the ninety-fourth occurrence of an already-public word protects nothing.
+ *
  * @returns {{ checked: boolean, why: string, sources: string[], terms: number,
- *   hits: { file: string, term: string, text: string, kind: "file" | "message" }[] }}
+ *   hits: { file: string, term: string, text: string, kind: "file" | "message" }[],
+ *   published?: { file: string, term: string, text: string, kind: "file" | "message" }[],
+ *   pervasive?: { term: string, count: number, files: number }[] }}
  */
 export declare function checkOutgoing({ cwd, extra }?: {
     cwd?: string;
@@ -102,6 +150,54 @@ export declare function checkOutgoing({ cwd, extra }?: {
         text: string;
         kind: "file" | "message";
     }[];
+    published?: {
+        file: string;
+        term: string;
+        text: string;
+        kind: "file" | "message";
+    }[];
+    pervasive?: {
+        term: string;
+        count: number;
+        files: number;
+    }[];
+};
+/**
+ * Split hits into what this gate can still do something about, and what the repository
+ * already publishes in force.
+ *
+ * Separate from checkOutgoing and pure, so the rule can be checked without a repository, a
+ * remote and a push - the three things that made the old shape untestable.
+ *
+ * NOTHING IS DROPPED. A pervasive term moves to `published` and is reported; it just stops
+ * refusing the push. See alreadyInRepo for why silence would be the dangerous version.
+ *
+ * @param {{ file: string, term: string, text: string, kind: "file" | "message" }[]} hits
+ * @param {(term: string) => { pervasive: boolean, count: number, files: number }} lookUp
+ */
+export declare function partitionHits(hits: {
+    file: string;
+    term: string;
+    text: string;
+    kind: "file" | "message";
+}[], lookUp: (term: string) => {
+    pervasive: boolean;
+    count: number;
+    files: number;
+}): {
+    hits: {
+        file: string;
+        term: string;
+        text: string;
+        kind: "file" | "message";
+    }[];
+    published: {
+        file: string;
+        term: string;
+        text: string;
+        kind: "file" | "message";
+    }[];
+    pervasive: any[];
 };
 /**
  * What to print when something was found.

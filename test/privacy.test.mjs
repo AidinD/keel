@@ -1,11 +1,27 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { MIN_TERM, addedLines, findTerms, outgoingMessages, parseMessages, privateTerms, report } from '../src/privacy/index.mjs'
+import { fileURLToPath } from 'node:url'
+
+import {
+  MIN_TERM,
+  PERVASIVE_MIN_FILES,
+  PERVASIVE_MIN_HITS,
+  addedLines,
+  alreadyInRepo,
+  findTerms,
+  outgoingMessages,
+  parseMessages,
+  partitionHits,
+  privateTerms,
+  report
+} from '../src/privacy/index.mjs'
+
+const HOOKS = join(fileURLToPath(new URL('..', import.meta.url)), 'hooks')
 
 /*
  * The guard that replaced a rule.
@@ -408,4 +424,107 @@ test('a name at the end of a sentence is found, which it was not until 2026-09-0
   assert.deepEqual(findTerms('const here = dirname(fileURLToPath(import.meta.url))', ['Meta']), [])
   assert.deepEqual(findTerms('.row-meta { color: red }', ['Meta']), [])
   assert.equal(findTerms('shipped it to Meta.', ['Meta']).length, 1, 'and the sentence-final case works for any term')
+})
+
+/*
+ * The fifth exception, and the rule that replaces the first four.
+ *
+ * Four times a push was refused over a word that was already in the repository hundreds of
+ * times - `meta`, `conversation`, `decisions`, `ownership` - and each time the fix was to add
+ * that word to a hand-maintained list AFTER it had cost a push. The obvious generalisation,
+ * "drop common English words", does not work: `meta` is jargon and `ownership` is not a
+ * frequent word, so a frequency list would have caught none of them.
+ *
+ * What the four actually share is written in `conversation`'s own note: "It appeared
+ * ninety-three times in already-published source before it was ever flagged." They are the
+ * CODEBASE'S OWN VOCABULARY. That is measurable, so it is measured instead of listed.
+ *
+ * The dangerous half is the one these checks care most about: a genuine name that is already
+ * public a hundred times must still be REPORTED. Refusing the hundred-and-first occurrence
+ * protects nothing, but going quiet about it would hide a real leak - which is the one thing
+ * this file must never do.
+ */
+
+test('a word the repository already uses everywhere is not something this gate can guard', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'keel-pervasive-'))
+  try {
+    const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', windowsHide: true })
+    git('init', '-q')
+    git('config', 'user.email', 'test@keel.local')
+    git('config', 'user.name', 'keel test')
+
+    // The codebase's own vocabulary: spread across files, the way a subject word is.
+    for (const n of [1, 2, 3, 4]) {
+      writeFileSync(join(dir, `module${n}.js`), Array.from({ length: 5 }, (_, i) => `// ownership rule ${i}`).join('\n'))
+    }
+    // A real name, mentioned once. This is the control: without it, a lookup that called
+    // everything pervasive would pass every assertion above it.
+    writeFileSync(join(dir, 'fixture.js'), 'const who = "Testperson"\n')
+    // A name repeated inside ONE file. Occurrences alone would call this vocabulary; it is
+    // a leak, and the file count is what tells the two apart.
+    writeFileSync(join(dir, 'leak.js'), Array.from({ length: 20 }, () => 'Realperson').join('\n'))
+    git('add', '-A')
+    git('commit', '-qm', 'seed')
+
+    const vocabulary = alreadyInRepo(dir, 'ownership')
+    assert.equal(vocabulary.pervasive, true, 'a word across four files and twenty lines is the codebase talking about itself')
+    assert.ok(vocabulary.count >= PERVASIVE_MIN_HITS, `counted ${vocabulary.count} occurrences`)
+    assert.ok(vocabulary.files >= PERVASIVE_MIN_FILES, `across ${vocabulary.files} files`)
+
+    assert.equal(alreadyInRepo(dir, 'Testperson').pervasive, false, 'a name mentioned once is still guardable')
+    assert.equal(
+      alreadyInRepo(dir, 'Realperson').pervasive,
+      false,
+      'twenty occurrences in ONE file is a leak, not vocabulary - both thresholds have to be met'
+    )
+    assert.equal(alreadyInRepo(dir, 'Neverwritten').pervasive, false, 'a word that is not there at all is not pervasive')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a pervasive term stops blocking but is still reported', () => {
+  const hits = [
+    { file: 'src/a.js', term: 'ownership', text: 'rather than on ownership.', kind: 'file' },
+    { file: 'commit abc12345 (message)', term: 'ownership', text: 'Ownership applies', kind: 'message' },
+    { file: 'src/b.js', term: 'Testperson', text: 'const who = "Testperson"', kind: 'file' }
+  ]
+  const split = partitionHits(hits, (term) =>
+    term === 'ownership' ? { pervasive: true, count: 93, files: 12 } : { pervasive: false, count: 0, files: 0 }
+  )
+
+  assert.deepEqual(
+    split.hits.map((h) => h.term),
+    ['Testperson'],
+    'only the guardable term still refuses the push'
+  )
+  // The half that matters most. Dropping these silently is how a guard hides a real leak.
+  assert.equal(split.published.length, 2, 'both pervasive hits are kept and reported, not discarded')
+  assert.deepEqual(split.pervasive, [{ term: 'ownership', pervasive: true, count: 93, files: 12 }], 'with the count, so the reader can judge')
+
+  // A push carrying ONLY pervasive terms must not be refused - and must not go quiet either.
+  const onlyPervasive = partitionHits(hits.slice(0, 2), () => ({ pervasive: true, count: 93, files: 12 }))
+  assert.equal(onlyPervasive.hits.length, 0, 'nothing left to block on')
+  assert.equal(onlyPervasive.published.length, 2, 'but the reader is still told what is in there')
+
+  // And the reverse: a lookup that finds nothing must change nothing.
+  const nothingKnown = partitionHits(hits, () => ({ pervasive: false, count: 0, files: 0 }))
+  assert.equal(nothingKnown.hits.length, 3, 'with no pervasive terms the gate keeps all its teeth')
+  assert.equal(nothingKnown.published.length, 0, 'and reports nothing as already-published')
+})
+
+test('the hook reports a pervasive term without refusing the push', () => {
+  /*
+   * Source-level, because reaching this for real needs a public remote and an outgoing push.
+   * What is pinned is the decision: the report runs BEFORE the exit-0 clean path, so a push
+   * that is otherwise clean still says what it carried, and nothing in that branch exits 1.
+   */
+  const hook = readFileSync(join(HOOKS, 'no-private-names.mjs'), 'utf8')
+  const reportAt = hook.indexOf('result.pervasive')
+  const cleanExit = hook.indexOf('if (result.hits.length === 0)')
+  assert.ok(reportAt > 0, 'the hook looks at the pervasive terms at all')
+  assert.ok(reportAt < cleanExit, 'and reports them before the clean-push early exit, or an otherwise clean push says nothing')
+  const between = hook.slice(reportAt, cleanExit)
+  assert.equal(/process\.exit\(1\)/.test(between), false, 'reporting a pervasive term never refuses the push')
+  assert.ok(/history/.test(between), 'and the message says what to do if it IS private - the history, not this push')
 })

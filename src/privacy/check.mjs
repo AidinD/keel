@@ -158,13 +158,90 @@ export function parseMessages(raw) {
 }
 
 /**
+ * How much of the repository a term has to already occupy before guarding it is hopeless.
+ *
+ * Both numbers have to be met. Occurrences alone would catch a single file that happens to
+ * repeat a real name twenty times - a leak, not vocabulary. Spread across several files is
+ * what says the word belongs to the codebase's own subject matter.
+ */
+export const PERVASIVE_MIN_HITS = 10;
+export const PERVASIVE_MIN_FILES = 3;
+
+/**
+ * Is this term already all over the published repository?
+ *
+ * The question this answers is not "is it private" but "can this gate still do anything about
+ * it". Four times now a push has been refused over a word that was already in the repository
+ * hundreds of times - `meta`, `conversation`, `decisions`, `ownership` - and each time the fix
+ * was to add the word to a hand-maintained list AFTER it had cost a push. The common thread
+ * was never how common the word is in English: `meta` is jargon and `ownership` is not a
+ * frequent word. It is that the word is the CODEBASE'S OWN vocabulary. `conversation`'s own
+ * note records the shape exactly: "It appeared ninety-three times in already-published source
+ * before it was ever flagged - the guard only reads changed lines, so it went unnoticed until
+ * one of those lines was edited."
+ *
+ * So the signal is measured rather than listed: count what is already committed.
+ *
+ * THE DANGEROUS CASE IS HANDLED BY REPORTING, NOT BY SILENCE. If a genuine private name is
+ * already in the repository ninety-three times, refusing the ninety-fourth protects nothing -
+ * the name is public, and what is needed is a history rewrite, not a blocked push. So a
+ * pervasive term is still surfaced, with its count, and the message says which of the two
+ * situations the reader is in. Dropping it quietly would be the version of this that hides a
+ * real leak, and that is the one thing this file must never do.
+ *
+ * Only ever called for a term that has already HIT, so a clean push pays nothing for it.
+ *
+ * @param {string} cwd
+ * @param {string} term
+ * @returns {{ pervasive: boolean, count: number, files: number }}
+ */
+export function alreadyInRepo(cwd, term) {
+  try {
+    // -F so a term with regex characters is a literal; -I to skip binaries; --name-only plus
+    // -c would be two calls, so count lines and distinct files from one output.
+    const out = execFileSync("git", ["-C", cwd, "grep", "-I", "-F", "-i", "-c", "--", term, "HEAD"], {
+      encoding: "utf8",
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024
+    });
+    let count = 0;
+    let files = 0;
+    for (const line of out.split(/\r?\n/)) {
+      // "HEAD:path/to/file:12"
+      const at = line.lastIndexOf(":");
+      if (at < 0) {
+        continue;
+      }
+      const n = Number(line.slice(at + 1));
+      if (!Number.isFinite(n)) {
+        continue;
+      }
+      files += 1;
+      count += n;
+    }
+    return { pervasive: count >= PERVASIVE_MIN_HITS && files >= PERVASIVE_MIN_FILES, count, files };
+  } catch {
+    // git grep exits non-zero when it finds nothing, and also when something is wrong. Both
+    // answer this question the same way: no evidence that the term is already everywhere, so
+    // the gate keeps its teeth. Failing towards blocking is the safe direction here.
+    return { pervasive: false, count: 0, files: 0 };
+  }
+}
+
+/**
  * Check what is about to be pushed. Returns what it found; decides nothing.
  *
  * @param {object} [opts]
  * @param {string} [opts.cwd]
  * @param {string[]} [opts.extra]
+ * `hits` is only what can still be guarded. A term the repository already publishes in force
+ * moves to `published` (with a count in `pervasive`) and does NOT block - see alreadyInRepo
+ * for why refusing the ninety-fourth occurrence of an already-public word protects nothing.
+ *
  * @returns {{ checked: boolean, why: string, sources: string[], terms: number,
- *   hits: { file: string, term: string, text: string, kind: "file" | "message" }[] }}
+ *   hits: { file: string, term: string, text: string, kind: "file" | "message" }[],
+ *   published?: { file: string, term: string, text: string, kind: "file" | "message" }[],
+ *   pervasive?: { term: string, count: number, files: number }[] }}
  */
 export function checkOutgoing({ cwd = process.cwd(), extra = [] } = {}) {
   const visibility = isPublic(cwd);
@@ -199,7 +276,42 @@ export function checkOutgoing({ cwd = process.cwd(), extra = [] } = {}) {
     }
   }
 
-  return { checked: true, why: visibility.why, sources, terms: terms.length, hits };
+  // Measured only for terms that actually hit, so a clean push pays nothing for it.
+  const split = partitionHits(hits, (term) => alreadyInRepo(cwd, term));
+
+  return { checked: true, why: visibility.why, sources, terms: terms.length, ...split };
+}
+
+/**
+ * Split hits into what this gate can still do something about, and what the repository
+ * already publishes in force.
+ *
+ * Separate from checkOutgoing and pure, so the rule can be checked without a repository, a
+ * remote and a push - the three things that made the old shape untestable.
+ *
+ * NOTHING IS DROPPED. A pervasive term moves to `published` and is reported; it just stops
+ * refusing the push. See alreadyInRepo for why silence would be the dangerous version.
+ *
+ * @param {{ file: string, term: string, text: string, kind: "file" | "message" }[]} hits
+ * @param {(term: string) => { pervasive: boolean, count: number, files: number }} lookUp
+ */
+export function partitionHits(hits, lookUp) {
+  const pervasive = new Map();
+  for (const term of new Set(hits.map((h) => h.term))) {
+    const seen = lookUp(term);
+    if (seen && seen.pervasive) {
+      pervasive.set(term, seen);
+    }
+  }
+  return {
+    // `hits` stays the blocking set, so every existing caller keeps its meaning.
+    hits: hits.filter((h) => !pervasive.has(h.term)),
+    // Surfaced, never silently dropped: if one of these is a genuine name then the leak
+    // already happened and a blocked push would not undo it - what is needed is a history
+    // rewrite, and the reader has to be told which of the two situations they are in.
+    published: hits.filter((h) => pervasive.has(h.term)),
+    pervasive: [...pervasive.entries()].map(([term, seen]) => ({ term, ...seen }))
+  };
 }
 
 /**
