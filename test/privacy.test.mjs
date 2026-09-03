@@ -94,6 +94,12 @@ test('the terms come from the private data, not from a list in any repository', 
 
     process.env.TEND_DATA_DIR = join(dir, 'tend')
     process.env.NIB_DATA_DIR = join(dir, 'nib')
+    // Pointed at an empty directory on purpose. Without this the handoff-topic
+    // source falls back to the real meta home and this test reads the machine's
+    // own private subjects - which is both a leak into the test output and a
+    // result that changes when somebody files a handoff. Every data source here
+    // needs its seam set, and this one is a third.
+    process.env.HELM_META_HOME = join(dir, 'no-meta-home')
 
     const { terms, sources } = privateTerms()
 
@@ -110,8 +116,101 @@ test('the terms come from the private data, not from a list in any repository', 
   } finally {
     delete process.env.TEND_DATA_DIR
     delete process.env.NIB_DATA_DIR
+    delete process.env.HELM_META_HOME
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('a private SUBJECT is a term too, not only a private name', () => {
+  /*
+   * The gap that let a real leak through on 2026-09-03. Every other source here
+   * finds a NAME - a person, a project, a product - and a public repository
+   * turned out to be carrying the other kind of private thing: what somebody's
+   * life is about. Illustrative examples and test fixtures had been drawn from
+   * one person's actual subjects, so a reader could read off their hobbies,
+   * their health habits and the fact they were job-hunting. The guard reported
+   * that push clean, and it was right to: it knew thirty names and no subjects.
+   *
+   * A handoff store keyed by topic is the missing roster - one file per durable
+   * subject, already outside every repository.
+   */
+  const dir = mkdtempSync(join(tmpdir(), 'keel-privacy-topics-'))
+  try {
+    mkdirSync(join(dir, '.helm', 'handoffs', 'superseded'), { recursive: true })
+    writeFileSync(join(dir, '.helm', 'handoffs', 'strength-training.md'), '# notes\n')
+    writeFileSync(join(dir, '.helm', 'handoffs', 'bikupor.md'), '# notes\n')
+    writeFileSync(join(dir, '.helm', 'handoffs', 'notes.md'), '# vocabulary, not a subject\n')
+    writeFileSync(join(dir, '.helm', 'handoffs', 'not-a-handoff.txt'), 'ignored\n')
+
+    process.env.HELM_META_HOME = dir
+    process.env.TEND_DATA_DIR = join(dir, 'no-tend')
+    process.env.NIB_DATA_DIR = join(dir, 'no-nib')
+
+    const { terms, sources } = privateTerms()
+
+    assert.ok(terms.includes('strength-training'), 'a filed subject is a term')
+    assert.ok(terms.includes('bikupor'), 'a single-word subject counts as well')
+    assert.ok(!terms.includes('not-a-handoff'), 'only the markdown files are subjects')
+    assert.ok(!terms.includes('notes'), "and the apps' own vocabulary is still not a leak")
+
+    /*
+     * The one that matters most, and the reason this source is kept whole.
+     * Splitting `strength-training` into words contributes `training`, which
+     * appears in ordinary prose and in identifiers - the same mistake this
+     * module already made once with Nib folder names, where reading every word
+     * produced 284 hits in one repository and not one of them was a leak. A
+     * guard that cries wolf is bypassed within a week.
+     */
+    assert.ok(
+      !terms.some((t) => t.toLowerCase() === 'training' || t.toLowerCase() === 'strength'),
+      'a subject is NOT split into words, or an ordinary word would flood every scan'
+    )
+    assert.ok(
+      sources.some((s) => s.includes('handoffs') && s.includes('3 topics')),
+      `and it says where the subjects came from (${JSON.stringify(sources)})`
+    )
+  } finally {
+    delete process.env.HELM_META_HOME
+    delete process.env.TEND_DATA_DIR
+    delete process.env.NIB_DATA_DIR
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a hyphenated subject is found even when a file extension follows it', () => {
+  /*
+   * The second half of the same leak, and the sharper half: the term was already
+   * in the list and the guard still passed the push.
+   *
+   * findTerms deliberately treats a dot or hyphen as INSIDE a name so that a
+   * product named after a common word does not match `import.meta`. The leaked
+   * line wrote the subject slug followed by `.md`, which is exactly that case -
+   * so the boundary rule refused to break there and the hit never happened.
+   *
+   * That rule is an argument about a single short word. It does not transfer to
+   * a term that is already several words, and applying it to those cost the
+   * leak. Both directions are asserted here, because relaxing it too far brings
+   * back the 44-hits-none-of-them-a-leak result that motivated it.
+   */
+  const subject = ['strength-training']
+  assert.equal(
+    findTerms('writeFileSync(join(d, "handoffs", "strength-training.md"), x)', subject).length,
+    1,
+    'the real leaked line is flagged - a slug followed by .md'
+  )
+  assert.equal(
+    findTerms('the strength-training-log variant', subject).length,
+    1,
+    'and so is a variant of the same subject'
+  )
+  assert.equal(findTerms('a note about strength-training.', subject).length, 1, 'and one at the end of a sentence')
+
+  // And the single-word protection is untouched - each of these cost a real
+  // false-positive storm before the boundary rule existed.
+  assert.deepEqual(findTerms('const here = dirname(fileURLToPath(import.meta.url))', ['Meta']), [])
+  assert.deepEqual(findTerms('const row_meta = 1', ['Meta']), [])
+  assert.deepEqual(findTerms('.row-meta { color: red }', ['Meta']), [])
+  assert.deepEqual(findTerms('const metadata = compute()', ['Meta']), [])
 })
 
 test('a malformed line is skipped rather than taking the whole check down', () => {

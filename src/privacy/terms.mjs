@@ -233,6 +233,95 @@ function nibNames(dir) {
 }
 
 /**
+ * The subjects a handoff store has filed, one per file.
+ *
+ * ## The gap this closes
+ *
+ * Everything above finds a NAME - a person, a project, a product. On 2026-09-03
+ * a public repository turned out to be carrying the opposite kind of private
+ * thing: not who somebody is, but what their life is about. Illustrative
+ * examples and test fixtures had been drawn from one person's actual subjects,
+ * so a reader could read off their hobbies, their health habits and the fact
+ * they were job-hunting. The guard reported the push clean, correctly - it knew
+ * thirty names and not one subject.
+ *
+ * A handoff store keyed by TOPIC is exactly the missing roster: one markdown
+ * file per durable life or work subject, already outside every repository, and
+ * self-maintaining in the same way Tend's roster is - a subject filed tonight is
+ * covered before it can be leaked.
+ *
+ * ## Kept WHOLE, never split into words
+ *
+ * This is the one source whose values must not go through the word split, and
+ * the reason is the mistake this module already made once with Nib: a slug like
+ * `strength-training` splits into `training`, which appears in ordinary prose
+ * and in identifiers, and a guard that cries wolf is bypassed within a week. A
+ * hyphenated slug is specific enough to mean something on its own; its
+ * individual words are not.
+ *
+ * A single-word subject that IS ordinary vocabulary still gets through as a
+ * term, and that is deliberate rather than overlooked: the pervasiveness check
+ * downstream already treats a word that is everywhere in a repository as that
+ * codebase's own vocabulary and says so, while the same word arriving in a
+ * repository that has never used it is worth a second look. That is the correct
+ * split of labour, and neither half is a substring match pretending to judge.
+ *
+ * @param {string} dir The meta home - the folder holding `.helm/`.
+ * @returns {string[]}
+ */
+function handoffTopics(dir) {
+  const handoffs = join(dir, ".helm", "handoffs");
+  if (!existsSync(handoffs)) {
+    return [];
+  }
+  try {
+    return readdirSync(handoffs)
+      .filter((file) => file.endsWith(".md"))
+      .map((file) => file.slice(0, -3).trim())
+      .filter((slug) => slug !== "");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Where the meta home is, for the one purpose of finding that store.
+ *
+ * `~/.claude/CLAUDE.md` is a stub that imports the real rules file from wherever
+ * it is synced to; the folder holding that file is the meta home.
+ *
+ * This is deliberately a SECOND implementation of a rule that already lives in
+ * one of the apps, which is normally the thing to avoid. Importing it would make
+ * this hook depend on one application being installed, and it runs in nine
+ * repositories where eight of them do not have it - a hook that throws is a hook
+ * somebody disables, and then nothing at all is protected. The cost of the two
+ * drifting apart is bounded and visible: this source reports no topics, and the
+ * printed source list is one line shorter.
+ *
+ * @returns {string}
+ */
+function metaHome() {
+  const home = homedir();
+  const override = dataDir("HELM_META_HOME", "");
+  if (override !== "") {
+    return override;
+  }
+  try {
+    const stub = readFileSync(join(home, ".claude", "CLAUDE.md"), "utf8");
+    const imported = stub.match(/^@(.+?CLAUDE\.md)\s*$/m);
+    if (imported) {
+      const dir = join(imported[1].trim(), "..");
+      if (existsSync(dir)) {
+        return dir;
+      }
+    }
+  } catch {
+    // No stub, or unreadable. The home directory is the honest fallback.
+  }
+  return home;
+}
+
+/**
  * Terms no data source knows, read from beside the private data.
  *
  * An employer's name is not in anybody's roster, so it has to be written down
@@ -288,6 +377,9 @@ export function privateTerms({ extra = [] } = {}) {
   const sources = [];
   /** @type {string[]} */
   const raw = [];
+  // Values that must NOT be split into words - see handoffTopics.
+  /** @type {string[]} */
+  const whole = [];
 
   for (const dir of [tend, `${tend.replace(/[\\/]+$/, "")}-private`]) {
     const names = tendNames(dir);
@@ -301,6 +393,13 @@ export function privateTerms({ extra = [] } = {}) {
   if (folders.length > 0) {
     sources.push(`${nib} (${folders.length} folders)`);
     raw.push(...folders);
+  }
+
+  const meta = metaHome();
+  const topics = handoffTopics(meta);
+  if (topics.length > 0) {
+    sources.push(`${join(meta, ".helm", "handoffs")} (${topics.length} topics)`);
+    whole.push(...topics);
   }
 
   const alsoTheirs = extraTerms(tend);
@@ -317,6 +416,13 @@ export function privateTerms({ extra = [] } = {}) {
       if (word.length >= MIN_TERM && !ALLOWED.has(word.toLowerCase())) {
         terms.add(word);
       }
+    }
+  }
+
+  for (const value of whole) {
+    const term = String(value).trim();
+    if (term.length >= MIN_TERM && !ALLOWED.has(term.toLowerCase())) {
+      terms.add(term);
     }
   }
 
@@ -355,6 +461,25 @@ export function privateTerms({ extra = [] } = {}) {
  * on the left, so `some-karlsson` stays a single identifier while `- Karlsson`
  * in a list does not.
  *
+ * ## A MULTI-WORD term skips the punctuation rule (2026-09-03)
+ *
+ * Everything above is an argument about a single short word: `Meta` must not
+ * match `import.meta`, because a name that happens to be an ordinary word turns
+ * up inside identifiers constantly. That argument does not transfer to a term
+ * that already contains a hyphen or a space. Such a term IS identifier-shaped
+ * and does not appear by accident.
+ *
+ * Applying the single-word rule to those cost a real leak. A private subject
+ * filed as a hyphenated slug was in the term list, and the line that leaked it
+ * wrote that slug followed by `.md` - where the dot-then-letter is exactly the
+ * identifier-joining case the rule refuses to break on. The term was known, the
+ * line was in the diff, and the guard reported the push clean.
+ *
+ * So a term containing a hyphen or a space keeps only the alphanumeric
+ * boundaries, and a variant of it (`<slug>-log`) matches too, which is what a
+ * reader wants - a variant of a private subject is the same private subject. A
+ * single word still gets the full rule, unchanged.
+ *
  * Case-insensitive, because a fixture id is lowercase and leaks just as well.
  *
  * @param {string} text
@@ -366,10 +491,13 @@ export function findTerms(text, terms) {
   const hits = [];
   const lines = text.split("\n");
   for (const term of terms) {
-    const pattern = new RegExp(
-      `(?<![\\p{L}\\p{N}_])(?<![\\p{L}\\p{N}][.-])${escape(term)}(?![\\p{L}\\p{N}_])(?![.-][\\p{L}\\p{N}])`,
-      "iu"
-    );
+    // A term that is already several words cannot land inside an identifier by
+    // accident, so it does not need - and must not have - the rule that keeps a
+    // single common word from matching `import.meta`. See the note above.
+    const multiWord = /[-\s]/.test(term);
+    const before = multiWord ? "(?<![\\p{L}\\p{N}_])" : "(?<![\\p{L}\\p{N}_])(?<![\\p{L}\\p{N}][.-])";
+    const after = multiWord ? "(?![\\p{L}\\p{N}_])" : "(?![\\p{L}\\p{N}_])(?![.-][\\p{L}\\p{N}])";
+    const pattern = new RegExp(`${before}${escape(term)}${after}`, "iu");
     lines.forEach((line, index) => {
       if (pattern.test(line)) {
         hits.push({ term, line: index + 1, text: line.trim().slice(0, 120) });

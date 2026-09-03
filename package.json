@@ -1,6 +1,6 @@
 {
   "name": "keel",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "The shared layer under Aidin's desktop suite: icon pipeline, window chrome, shell CSS, release guards, storage primitives, credential reads.",
   "license": "MIT",
   "type": "module",

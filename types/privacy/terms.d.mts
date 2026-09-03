@@ -87,6 +87,25 @@ export declare function privateTerms({ extra }?: {
  * on the left, so `some-karlsson` stays a single identifier while `- Karlsson`
  * in a list does not.
  *
+ * ## A MULTI-WORD term skips the punctuation rule (2026-09-03)
+ *
+ * Everything above is an argument about a single short word: `Meta` must not
+ * match `import.meta`, because a name that happens to be an ordinary word turns
+ * up inside identifiers constantly. That argument does not transfer to a term
+ * that already contains a hyphen or a space. Such a term IS identifier-shaped
+ * and does not appear by accident.
+ *
+ * Applying the single-word rule to those cost a real leak. A private subject
+ * filed as a hyphenated slug was in the term list, and the line that leaked it
+ * wrote that slug followed by `.md` - where the dot-then-letter is exactly the
+ * identifier-joining case the rule refuses to break on. The term was known, the
+ * line was in the diff, and the guard reported the push clean.
+ *
+ * So a term containing a hyphen or a space keeps only the alphanumeric
+ * boundaries, and a variant of it (`<slug>-log`) matches too, which is what a
+ * reader wants - a variant of a private subject is the same private subject. A
+ * single word still gets the full rule, unchanged.
+ *
  * Case-insensitive, because a fixture id is lowercase and leaks just as well.
  *
  * @param {string} text
