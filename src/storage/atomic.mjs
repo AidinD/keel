@@ -145,9 +145,9 @@ export function writeFileAtomicSync(filePath, contents, { onBeforeRename, app } 
     const temp = tempPathFor(filePath)
     try {
       fs.mkdirSync(directory, { recursive: true })
-      fs.writeFileSync(temp, contents, 'utf8')
 
       if (onBeforeRename === undefined) {
+        fs.writeFileSync(temp, contents, 'utf8')
         fs.renameSync(temp, filePath)
         return { ok: true }
       }
@@ -162,14 +162,24 @@ export function writeFileAtomicSync(filePath, contents, { onBeforeRename, app } 
       let abort = null
       const lock = acquireLock(filePath)
       try {
+        // THE TEMP IS WRITTEN INSIDE THE LOCK, and it used to be written before it.
+        // These data directories are Dropbox-synced, so a temp file's lifetime is
+        // not free: the sync client indexes it and can take a handle on it, which is
+        // the exact EPERM-on-rename this module retries for, and an abandoned one is
+        // how a dispatch directory once accumulated 1462 orphans. Writing it first
+        // left it sitting in a synced folder for the whole lock wait - review
+        // measured 3000ms of a 3000ms wait, against microseconds before the lock
+        // existed. Inside the lock the hold grows by one file write, which is the
+        // same order as the hash read already in here.
+        fs.writeFileSync(temp, contents, 'utf8')
         abort = onBeforeRename()
         if (!abort) {
           fs.renameSync(temp, filePath)
           return { ok: true }
         }
       } finally {
-        // Released before any backoff below, never held across a sleep: the hold
-        // is a hash read and a rename, so a waiter is never behind a wait.
+        // Released before any backoff below, never held across a sleep: the hold is
+        // a temp write, a hash read and a rename, so a waiter is never behind a wait.
         releaseLock(lock)
       }
 

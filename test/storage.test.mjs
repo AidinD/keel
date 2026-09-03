@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -157,6 +157,239 @@ test('the guarded write holds the lock across hook and rename, and gives it back
   assert.equal(result.ok, true)
   assert.equal(heldDuringHook, true, 'the hook must run while the lock is held')
   assert.equal(existsSync(lockPath), false, 'and the lock must be released afterwards')
+})
+
+test('the lock is still held AT the rename, not merely at some point during the hook', () => {
+  // The assertion above this one - "was the lock there while the hook ran" - passes
+  // when the lock is released BEFORE the rename, which re-opens the entire window
+  // this module exists to close. Mutation testing found that hole: narrowing the
+  // lock to cover only the hook survived every suite. So observe the lock from
+  // inside the rename itself, which is the only moment that matters.
+  const dir = scratch()
+  const target = join(dir, 'spans.json')
+  const lockPath = lockPathFor(target)
+
+  let heldAtRename = null
+  const realRename = fs.renameSync
+  try {
+    fs.renameSync = (from, to) => {
+      if (to === target) {
+        heldAtRename = existsSync(lockPath)
+      }
+      return realRename.call(fs, from, to)
+    }
+    assert.equal(writeFileAtomicSync(target, 'x', { onBeforeRename: () => null }).ok, true)
+  } finally {
+    fs.renameSync = realRename
+  }
+
+  assert.equal(heldAtRename, true, 'a lock that does not span the rename is not a lock')
+  assert.equal(existsSync(lockPath), false, 'and it is released after the rename, not before it')
+})
+
+test('the temp file is created inside the lock, not before it', () => {
+  // A temp written before the lock sits in a Dropbox-synced directory for the whole
+  // lock wait, where the sync client indexes it and can take a handle on it - which
+  // is the EPERM-on-rename this module retries for, and how orphaned temps happen.
+  const dir = scratch()
+  const target = join(dir, 'ordered.json')
+  const lockPath = lockPathFor(target)
+
+  let tempsWhenLockTaken = null
+  const realMkdir = fs.mkdirSync
+  try {
+    fs.mkdirSync = (dirPath, options) => {
+      const result = realMkdir.call(fs, dirPath, options)
+      if (dirPath === lockPath) {
+        tempsWhenLockTaken = readdirSync(dir).filter((file) => file.endsWith('.tmp')).length
+      }
+      return result
+    }
+    assert.equal(writeFileAtomicSync(target, 'x', { onBeforeRename: () => null }).ok, true)
+  } finally {
+    fs.mkdirSync = realMkdir
+  }
+
+  assert.equal(tempsWhenLockTaken, 0, 'the temp must not exist yet when the lock is taken')
+})
+
+test('a LIVE holder past the age threshold keeps its lock', () => {
+  // THE LOST-UPDATE BUG THIS REPLACED. The takeover rule used to be age alone, which
+  // cannot tell a dead holder from one stalled by paging, a long GC, an antivirus
+  // scan of the file it is hashing, or a suspended machine. Review reproduced the
+  // consequence: two writers holding one lock, both told ok:true, one write gone.
+  const dir = scratch()
+  const target = join(dir, 'liveholder.json')
+  const lockPath = lockPathFor(target)
+
+  // A lock that is very old and claimed by a process that certainly exists: this one.
+  mkdirSync(lockPath, { recursive: true })
+  writeFileSync(join(lockPath, 'owner.json'), JSON.stringify({ pid: process.pid, nonce: 'someone-elses', at: 0 }))
+  const longAgo = new Date(Date.now() - 600_000)
+  utimesSync(lockPath, longAgo, longAgo)
+
+  assert.throws(
+    () => acquireLock(target),
+    /live writer is holding/,
+    'an old lock whose holder is alive must be waited for and then refused, never broken'
+  )
+  assert.equal(existsSync(lockPath), true, 'and it must still be there afterwards')
+
+  // And the holder's own claim is not something a stranger may delete on the way out.
+  releaseLock({ lockPath, nonce: 'not-the-holders-nonce' })
+  assert.equal(existsSync(lockPath), true, 'releaseLock must not remove a lock it does not own')
+
+  rmSync(lockPath, { recursive: true, force: true })
+})
+
+test('a DEAD holder past the age threshold loses its lock at once', () => {
+  const dir = scratch()
+  const target = join(dir, 'deadholder.json')
+  const lockPath = lockPathFor(target)
+
+  // A pid that certainly does not exist: a child process we waited for.
+  const corpse = spawnSync(process.execPath, ['-e', 'process.exit(0)'])
+  assert.equal(corpse.status, 0)
+
+  mkdirSync(lockPath, { recursive: true })
+  writeFileSync(join(lockPath, 'owner.json'), JSON.stringify({ pid: corpse.pid, nonce: 'gone', at: Date.now() }))
+
+  const started = Date.now()
+  const lock = acquireLock(target)
+  const waited = Date.now() - started
+  assert.equal(lock.lockPath, lockPath)
+  assert.ok(waited < 500, `a dead holder's lock is taken over immediately, not waited out (${waited}ms)`)
+  releaseLock(lock)
+  assert.equal(existsSync(lockPath), false)
+})
+
+test('a taken-over holder does not delete the new holder`s lock on its way out', () => {
+  // The cascade review traced: A stalls, B takes over, A's release deletes B's
+  // directory, C walks in while B is renaming, B's release deletes C's. One stalled
+  // holder de-serialises the queue indefinitely rather than once.
+  const dir = scratch()
+  const target = join(dir, 'cascade.json')
+
+  const first = acquireLock(target)
+  // Simulate the takeover: someone else replaced the claim with their own.
+  writeFileSync(join(first.lockPath, 'owner.json'), JSON.stringify({ pid: process.pid, nonce: 'the-new-holder', at: Date.now() }))
+
+  releaseLock(first)
+  assert.equal(existsSync(first.lockPath), true, "the stale holder must leave the new holder's lock alone")
+
+  rmSync(first.lockPath, { recursive: true, force: true })
+})
+
+test('anything that is not a lock directory degrades at once, instead of spinning', () => {
+  // Reading a permission error as contention made a stray FILE at the lock path -
+  // or an unwritable temp directory - spin for the whole wait and then fail, on
+  // every write, permanently, while reporting "another writer is holding it" when
+  // nobody was. Measured by review at 10s per write with no self-healing.
+  const dir = scratch()
+  const target = join(dir, 'wedged.json')
+  const lockPath = lockPathFor(target)
+
+  writeFileSync(lockPath, 'not a lock directory')
+  const started = Date.now()
+  const lock = acquireLock(target)
+  const waited = Date.now() - started
+  assert.equal(lock.lockPath, null, 'it must degrade to the content guard, not wait for a phantom holder')
+  assert.ok(waited < 500, `and it must decide that at once (${waited}ms)`)
+
+  // The write itself must still succeed rather than being refused over the lock.
+  assert.equal(writeFileAtomicSync(target, 'through', { onBeforeRename: () => null }).ok, true)
+  assert.equal(readFileSync(target, 'utf8'), 'through')
+
+  rmSync(lockPath, { force: true })
+})
+
+test('a lock released between the failed mkdir and the check is contention, not a missing lock', () => {
+  // The first version of the path-based classification degraded here, so ordinary
+  // contention - a holder releasing in the microseconds between our mkdir and our
+  // stat - made the write proceed with NO lock, silently. Caught by the concurrency
+  // test's worker-stderr check on its first run, which is the only reason it is not
+  // still in there: nothing else looks at that warning.
+  const dir = scratch()
+  const target = join(dir, 'vanishing.json')
+  const lockPath = lockPathFor(target)
+  const original = fs.mkdirSync
+  let denied = 0
+  let lock
+
+  try {
+    fs.mkdirSync = (dirPath, options) => {
+      // Fail exactly as a contended mkdir does, while leaving the path empty - the
+      // state a released lock leaves behind.
+      if (dirPath === lockPath && denied < 2) {
+        denied += 1
+        throw errno('EEXIST')
+      }
+      return original.call(fs, dirPath, options)
+    }
+    lock = acquireLock(target)
+  } finally {
+    fs.mkdirSync = original
+  }
+
+  assert.equal(denied, 2, 'the simulated contention must have fired')
+  assert.ok(lock.lockPath, 'it must keep trying and end up HOLDING the lock, not running unlocked')
+  releaseLock(lock)
+})
+
+test('...and stays contention however long it lasts, not just briefly', () => {
+  // The same misclassification, third instance: EEXIST-with-nothing-there was
+  // treated as a release in flight only for a short grace window, and past it the
+  // write proceeded with no lock. Under a loaded machine - the full test suite runs
+  // four files at a time - ordinary contention lands in that branch for longer than
+  // any short window. EEXIST is positive evidence that something WAS there, so no
+  // time limit belongs on it.
+  const dir = scratch()
+  const target = join(dir, 'stubborn.json')
+  const lockPath = lockPathFor(target)
+  const original = fs.mkdirSync
+  const denyUntil = Date.now() + 600 // comfortably past LOCK_TRANSIENT_GRACE_MS
+  let lock
+
+  try {
+    fs.mkdirSync = (dirPath, options) => {
+      if (dirPath === lockPath && Date.now() < denyUntil) {
+        throw errno('EEXIST')
+      }
+      return original.call(fs, dirPath, options)
+    }
+    lock = acquireLock(target)
+  } finally {
+    fs.mkdirSync = original
+  }
+
+  assert.ok(lock.lockPath, 'sustained contention must not degrade into running unlocked')
+  releaseLock(lock)
+})
+
+test('every errno that means "no usable lock" degrades fast, not just ENOSPC', () => {
+  const dir = scratch()
+  const target = join(dir, 'errnos.json')
+  const lockPath = lockPathFor(target)
+  const original = fs.mkdirSync
+
+  for (const code of ['ENOSPC', 'ENOENT', 'EROFS', 'ENOTDIR', 'EACCES', 'EPERM', 'EBUSY']) {
+    let lock
+    const started = Date.now()
+    try {
+      fs.mkdirSync = (dirPath, options) => {
+        if (dirPath === lockPath) {
+          throw errno(code)
+        }
+        return original.call(fs, dirPath, options)
+      }
+      lock = acquireLock(target)
+    } finally {
+      fs.mkdirSync = original
+    }
+    const waited = Date.now() - started
+    assert.equal(lock.lockPath, null, `${code} must degrade`)
+    assert.ok(waited < 500, `${code} must degrade at once, not spin (${waited}ms)`)
+  }
 })
 
 test('an unguarded write takes no lock - last writer wins is the accepted deal there', () => {

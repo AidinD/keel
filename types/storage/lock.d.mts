@@ -43,10 +43,17 @@ export declare const backoffMs: (attempt: number) => number;
 /**
  * Block for `ms` without burning CPU.
  *
- * Deliberately synchronous. The sync writers are called straight from IPC
- * handlers, this path is rare, and the total is bounded to a few hundred
- * milliseconds; the alternative is silently dropping a write the user asked for.
- * Frequency is what makes blocking unacceptable, not blocking itself.
+ * Deliberately synchronous. The sync writers are called straight from IPC handlers
+ * and the alternative is silently dropping a write the user asked for; frequency is
+ * what makes blocking unacceptable, not blocking itself.
+ *
+ * WHAT THE TOTAL IS BOUNDED BY, since this comment used to promise "a few hundred
+ * milliseconds" and that stopped being true the moment a lock wait joined the
+ * retry backoff: the rename retries add up to 360ms, and one lock wait adds up to
+ * `LOCK_WAIT_MS`. A timed-out acquire is neither a transient lock nor an abort, so
+ * no loop above re-acquires after one - a single user action waits for the lock at
+ * most once. Keep it that way; the number that was here before was wrong by two
+ * orders of magnitude and nothing in the code noticed.
  *
  * @param {number} ms
  */
@@ -108,25 +115,28 @@ export declare function lockPathFor(filePath: string): string;
  * writer sees a clean EEXIST-or-success.
  *
  * Returns a handle to pass to `releaseLock`. `lockPath: null` means the lock could
- * not be used at all (no temp directory, read-only, out of space) and the caller
- * is running on its content guard alone: degrading is better than refusing a write
- * over a lock that is only ever a narrowing of an already-narrow window.
+ * not be used at all (no temp directory, read-only, something that is not a lock
+ * sitting at the path) and the caller is running on its content guard alone:
+ * degrading is better than refusing a write over a lock that is only ever a
+ * narrowing of an already-narrow window.
  *
- * Throws if the lock is still held after `LOCK_WAIT_MS`, which means another
- * writer is stuck rather than busy. Callers turn that into "nothing was changed".
+ * Throws if a LIVE holder still has it after `LOCK_WAIT_MS`, which means another
+ * writer is wedged rather than busy. Callers turn that into "nothing was changed".
  *
  * @param {string} filePath
- * @returns {{ lockPath: string | null }}
+ * @returns {{ lockPath: string | null, nonce: string | null }}
  */
 export declare function acquireLock(filePath: string): {
     lockPath: string | null;
+    nonce: string | null;
 };
 /**
  * Give the lock back. Never throws - a lock left behind is survivable, because the
- * next writer takes it over as stale.
+ * next writer takes it over once its holder is gone.
  *
- * @param {{ lockPath: string | null } | null} lock
+ * @param {{ lockPath: string | null, nonce?: string | null } | null} lock
  */
 export declare function releaseLock(lock: {
     lockPath: string | null;
+    nonce?: string | null;
 } | null): void;

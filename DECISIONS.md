@@ -2,38 +2,68 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
-## 2026-09-03 - A precondition hook that is not locked is decoration, and retrying it is worse than useless
+## 2026-09-03 - A precondition hook that is not locked is decoration, and a lock that is not owned is worse
 
-`writeFileAtomicSync` grew an `onBeforeRename` hook so a store could re-check a precondition immediately before the swap - the lost-update guard two consumers needed.
-Both of the things around that hook were wrong, in opposite directions.
+`writeFileAtomicSync` grew an `onBeforeRename` hook so a store could re-check a precondition immediately before the swap - the lost-update guard three consumers needed.
+Both of the things around that hook were wrong, in opposite directions, and fixing them wrongly introduced two more.
+The whole sequence is here because every wrong version passed its own tests.
 
-**The hook was outside any lock.** A check followed by a rename is two steps, and another writer can pass its own check while your rename is in flight and then rename over you.
-The hook made the window one hash read wide instead of seconds wide, which reads like a fix and is not one.
-Measured by removing only the lock from this function and running Helm's Jot concurrency test again: 7 of 720 contended writes silently lost, against 0 of 1440 with it, with six competing processes and the content hash present in both runs.
-A guard that is right one step before the swap and loses anyway is the failure it was written to prevent, so the hook and the rename now run while holding an exclusive lock.
+**The hook ran outside any lock.**
+A check followed by a rename is two steps, and another writer can pass its own check while your rename is in flight and then rename over you.
+The hook narrowed the window from seconds to one hash read, which reads like a fix and is not one.
+Measured by removing only the lock and re-running a consumer's concurrency test: 7 of 720 contended writes silently lost, and an independent reviewer measured 4, 0 and 3 of 240 in three runs of their own - against 0 of 1440 with the lock, six competing processes, content hash present in every run.
+Note their middle run. Loss needs two writers inside the same few microseconds, so a single clean run is not evidence the lock is unnecessary, and the consumer's test now aggregates over rounds for that reason.
 
-**A refused hook was retried.** The loop treated an abort like a transient lock and `continue`d, with no backoff and nothing re-read.
+**A refused hook was retried.**
+The loop treated a refusal like a transient lock and `continue`d, with nothing re-read.
 But `contents` and whatever the hook compares against are both fixed by the caller before the first attempt, so all four attempts checked the same stale expectation against the same stale bytes and failed identically - four temp files written and deleted to reach a verdict already reached on the first.
 Worse, it buried the one signal the caller needed: "your data is stale, read it again".
-A refusal now returns immediately with `aborted: true`, and the retry that can actually succeed - re-read, re-apply, re-write - belongs to the caller, which is the only layer holding the mutation.
+A refusal now returns immediately with `aborted: true`, and the retry that can succeed - re-read, re-apply, re-write - belongs to the caller, which is the only layer holding the mutation.
+This loop had silently absorbed one such caller's retry when the atomic write was centralised here on 2026-07-27: retrying a write is not retrying a read, and only the second can resolve a concurrent edit.
 
-**The lock is a directory, not a lock file.** The obvious version - exclusive-create a file, unlink it on release - is broken on Windows: the file still has an open handle when the release unlinks it, so the deletion goes pending and the next process's exclusive create fails with EPERM rather than EEXIST.
-A caller reading that EPERM as "no lock here" degrades to the unlocked path and loses a write, which is how it was found elsewhere in the suite.
-`mkdir` is atomic and nothing holds a handle to a directory that is never opened.
+**Then the lock broke live holders, which is worse than having no lock.**
+The first version took over any lock older than five seconds, on the theory that a hold is only a hash read and a rename so anything older is a corpse.
+Age cannot tell a corpse from a holder stalled by paging, a long GC, an antivirus scan of the very file it is hashing, a debugger, or a suspended machine.
+Review reproduced the consequence end to end: two writers holding one lock, both told `ok: true`, one write gone - with the content hash passing on both sides, because a hash check cannot see a writer that also passed it.
+And it cascaded, which the "documented trade-off" had not accounted for: the stalled holder's release deleted the *new* holder's directory, so a third writer walked in mid-rename, and one stall de-serialised the queue indefinitely rather than once.
+
+So liveness decides now, not age.
+The holder writes `{pid, nonce}` into the lock directory; a lock is abandoned only when that process no longer exists (`process.kill(pid, 0)`), and `releaseLock` removes the directory only while the nonce inside it is still ours.
+Age survives for the one case it can answer: a lock directory with no readable claim, left by something that died between the `mkdir` and its claim.
+Pid reuse could in principle make a corpse look alive; the cost is a waiter that waits out its deadline and refuses, never a broken lock.
+That asymmetry is the design rule - every remaining ambiguity resolves towards refusing a write rather than towards taking a lock we may not have.
+
+**Classifying `mkdir` failures by errno was wrong in both directions.**
+Windows reports contention and an unwritable temp directory with the same codes, so no single look distinguishes them.
+Reading `EACCES`/`EPERM` as contention made a stray *file* at the predictable lock path spin for the whole wait and then fail the write - permanently, on every write, with a message claiming another writer held it when nothing did.
+Reading them as structural was worse: two separate versions of that fix ran the write with **no lock at all** under ordinary contention, first when a holder released between our `mkdir` and our `stat` (`EEXIST`, path already gone), then in the Windows pending-delete case (`EPERM`, same shape).
+Both were caught immediately, and only because the consumer's concurrency test had just been taught to fail on a worker's stderr - `keel/storage` writes a warning exactly when it degrades, and nothing had ever looked at it.
+
+What decides it now is what is *at* the path, plus time: a directory is contention; something that is not a directory is structural; nothing at the path is believed to be a release in flight for 250ms and structural after that.
+The grace window is the only property that actually separates them - a pending delete clears in milliseconds, an unwritable directory never does - and it bounds the cost of the ambiguity to a quarter second per write in an already-broken configuration.
+
+**The wait came down from 10s to 2s, and the temp moved inside the lock.**
+These writers are synchronous and are called straight from Electron IPC handlers, so the lock wait is a window in which the whole app is frozen.
+Review measured a successful write blocking for 22.6 seconds, against a `sleepSync` comment that justified the blocking design with "the total is bounded to a few hundred milliseconds".
+A dead holder's lock is now taken over at once, so reaching the deadline means a *live* writer is wedged, and the honest answer to that is a refused write rather than a longer freeze.
+Writing the temp file inside the lock rather than before it fixed a second-order problem review found: these data directories are Dropbox-synced, and a temp that used to exist for microseconds was sitting there for the entire lock wait (measured 3000ms of a 3000ms wait), which is how the sync client takes a handle on it and produces the `EPERM`-on-rename this module retries for.
+It also, unexpectedly, cut the collision rate for every caller by serialising the whole write - which made an earlier measured refusal-rate regression in another consumer unreproducible.
 
 **What was considered and rejected.**
-Locking every write, not just guarded ones: `fleetState.json` is rewritten every ~5s and has no precondition to protect, so a mutex round trip per write buys nothing there, and last-writer-wins is the accepted deal for those stores.
-Putting the lock next to the file it protects: inside a Dropbox-synced folder it would sync to other machines and arrive as a phantom lock on a file nobody is writing, so it lives in the system temp directory and is therefore explicitly per-machine.
-Refusing the write when no lock can be taken at all (no temp directory, read-only, out of space): the lock is a narrowing of an already-narrow window, so losing it must not cost the user their write - it warns once and falls back to the content guard.
+Locking every write, not just guarded ones: `fleetState.json` is rewritten every ~5s with no precondition to protect, so a mutex round trip per write buys nothing, and last-writer-wins is the accepted deal for those stores.
+Putting the lock beside the file it protects: inside a synced folder it would arrive on another machine as a phantom lock on a file nobody is writing, so it lives in the system temp directory and is therefore explicitly per-machine.
+Refusing the write when no lock can be taken at all: the lock is a narrowing of an already-narrow window, so losing it must not cost the user their write - it warns once and falls back to the content guard.
+Keeping the age rule and documenting the live-holder trade: rejected once review showed it cascades rather than costing one write.
+Refreshing the lock's mtime during a long hold, as an alternative to the liveness check: it keeps age as the mechanism and only moves the threshold, so a holder that stalls *without* running code still loses its lock.
 
 **What the lock does not cover, stated because it will be assumed otherwise.**
 It binds only writers that take it.
-Jot's own app writes the same board and does not, so an app write landing inside that same two-step window can still be overwritten; closing that needs the other app to cooperate.
+Jot's own app writes the same board and does not, so an app write landing inside the same two-step window can still be overwritten; closing that needs the other app to cooperate.
 Nothing across machines is enforceable either - Dropbox can replace a file wholesale, and the content guard refusing is the most that is available.
 
-**The lock's name is a cross-process contract.**
-Two writers only exclude each other if they compute the same path for the same file, so `lockPathFor` is path-derived and lowercased rather than random.
-One standalone script outside the suite reimplements it, because it has to run from any directory with no package resolution; its own test asserts the literal name rather than importing it, since a rename on either side would leave both sides working and quietly excluding nothing.
+**The lock's name and the claim inside it are a cross-process contract.**
+Two writers only exclude each other if they compute the same path and agree on the ownership protocol, so `lockPathFor` is path-derived and lowercased rather than random.
+One standalone script outside the suite reimplements both, because it has to run from any directory with no package resolution; its own test asserts the literal name and drives this module directly, in both directions, so a rename or a protocol change on either side fails there rather than silently leaving each side holding a private lock.
 
 ## 2026-08-31 - What a one-shot model call was actually paying for
 
