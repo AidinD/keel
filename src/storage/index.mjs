@@ -13,7 +13,17 @@
  * and it is where all the incidents are.
  */
 
-export { MAX_ATTEMPTS, backoffMs, delay, isTransientLock, sleepSync } from './lock.mjs'
+export {
+  MAX_ATTEMPTS,
+  acquireLock,
+  backoffMs,
+  delay,
+  isTransientLock,
+  jitteredBackoffMs,
+  lockPathFor,
+  releaseLock,
+  sleepSync
+} from './lock.mjs'
 export {
   bestEffortRemove,
   plainReason,

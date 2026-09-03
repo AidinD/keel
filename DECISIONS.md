@@ -2,6 +2,39 @@
 
 Newest first. Each entry records the decision, what else was considered, and why.
 
+## 2026-09-03 - A precondition hook that is not locked is decoration, and retrying it is worse than useless
+
+`writeFileAtomicSync` grew an `onBeforeRename` hook so a store could re-check a precondition immediately before the swap - the lost-update guard two consumers needed.
+Both of the things around that hook were wrong, in opposite directions.
+
+**The hook was outside any lock.** A check followed by a rename is two steps, and another writer can pass its own check while your rename is in flight and then rename over you.
+The hook made the window one hash read wide instead of seconds wide, which reads like a fix and is not one.
+Measured by removing only the lock from this function and running Helm's Jot concurrency test again: 7 of 720 contended writes silently lost, against 0 of 1440 with it, with six competing processes and the content hash present in both runs.
+A guard that is right one step before the swap and loses anyway is the failure it was written to prevent, so the hook and the rename now run while holding an exclusive lock.
+
+**A refused hook was retried.** The loop treated an abort like a transient lock and `continue`d, with no backoff and nothing re-read.
+But `contents` and whatever the hook compares against are both fixed by the caller before the first attempt, so all four attempts checked the same stale expectation against the same stale bytes and failed identically - four temp files written and deleted to reach a verdict already reached on the first.
+Worse, it buried the one signal the caller needed: "your data is stale, read it again".
+A refusal now returns immediately with `aborted: true`, and the retry that can actually succeed - re-read, re-apply, re-write - belongs to the caller, which is the only layer holding the mutation.
+
+**The lock is a directory, not a lock file.** The obvious version - exclusive-create a file, unlink it on release - is broken on Windows: the file still has an open handle when the release unlinks it, so the deletion goes pending and the next process's exclusive create fails with EPERM rather than EEXIST.
+A caller reading that EPERM as "no lock here" degrades to the unlocked path and loses a write, which is how it was found elsewhere in the suite.
+`mkdir` is atomic and nothing holds a handle to a directory that is never opened.
+
+**What was considered and rejected.**
+Locking every write, not just guarded ones: `fleetState.json` is rewritten every ~5s and has no precondition to protect, so a mutex round trip per write buys nothing there, and last-writer-wins is the accepted deal for those stores.
+Putting the lock next to the file it protects: inside a Dropbox-synced folder it would sync to other machines and arrive as a phantom lock on a file nobody is writing, so it lives in the system temp directory and is therefore explicitly per-machine.
+Refusing the write when no lock can be taken at all (no temp directory, read-only, out of space): the lock is a narrowing of an already-narrow window, so losing it must not cost the user their write - it warns once and falls back to the content guard.
+
+**What the lock does not cover, stated because it will be assumed otherwise.**
+It binds only writers that take it.
+Jot's own app writes the same board and does not, so an app write landing inside that same two-step window can still be overwritten; closing that needs the other app to cooperate.
+Nothing across machines is enforceable either - Dropbox can replace a file wholesale, and the content guard refusing is the most that is available.
+
+**The lock's name is a cross-process contract.**
+Two writers only exclude each other if they compute the same path for the same file, so `lockPathFor` is path-derived and lowercased rather than random.
+One standalone script outside the suite reimplements it, because it has to run from any directory with no package resolution; its own test asserts the literal name rather than importing it, since a rename on either side would leave both sides working and quietly excluding nothing.
+
 ## 2026-08-31 - What a one-shot model call was actually paying for
 
 A consumer measured its own model buttons and found a single cheap-tier call with a one-sentence question and a two-field answer costing 8.8 cents, and a writing-tier call with the same size of question costing 32.9 cents.

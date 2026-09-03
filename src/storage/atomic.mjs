@@ -31,7 +31,7 @@ import { promises as fsp } from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 
-import { MAX_ATTEMPTS, backoffMs, delay, isTransientLock, sleepSync } from './lock.mjs'
+import { MAX_ATTEMPTS, acquireLock, backoffMs, delay, isTransientLock, releaseLock, sleepSync } from './lock.mjs'
 
 /**
  * A temp path nobody else will pick.
@@ -119,36 +119,78 @@ export function bestEffortRemove(temp) {
  * a meaningful "the write did not happen" path and a throw is how these failures
  * got lost in the first place.
  *
+ * A returned `aborted: true` means the precondition hook refused: nothing was
+ * written, and the caller's own data is stale. That is a different answer from
+ * every other failure here, and the only one where trying again can help - see
+ * the note above the hook below.
+ *
  * @param {string} filePath
  * @param {string} contents
  * @param {object} [options]
  * @param {(() => string | null)} [options.onBeforeRename] Re-check preconditions
- *   immediately before the rename; return a reason to abort this attempt and
- *   retry. Helm's Jot bridge uses it for its concurrent-edit guard.
+ *   immediately before the rename; return a reason to refuse the write. Runs
+ *   under the write lock, together with the rename. Helm's Jot bridge uses it for
+ *   its concurrent-edit guard.
  * @param {string} [options.app] Name for the plain-language failure messages.
- * @returns {{ ok: true } | { ok: false, error: string }}
+ * @returns {{ ok: true } | { ok: false, error: string, aborted?: true }}
  */
 export function writeFileAtomicSync(filePath, contents, { onBeforeRename, app } = {}) {
   const directory = path.dirname(filePath)
   let lastError = null
 
+  // The loop is for TRANSIENT LOCKS and nothing else: same bytes, same
+  // preconditions, a target someone will let go of shortly. A refused
+  // precondition is the opposite case and returns immediately - see below.
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     const temp = tempPathFor(filePath)
     try {
       fs.mkdirSync(directory, { recursive: true })
       fs.writeFileSync(temp, contents, 'utf8')
 
-      if (onBeforeRename !== undefined) {
-        const abort = onBeforeRename()
-        if (abort) {
-          bestEffortRemove(temp)
-          lastError = abort
-          continue
-        }
+      if (onBeforeRename === undefined) {
+        fs.renameSync(temp, filePath)
+        return { ok: true }
       }
 
-      fs.renameSync(temp, filePath)
-      return { ok: true }
+      // THE HOOK AND THE RENAME ARE ONE STEP, or the hook is decoration: another
+      // writer that passes its own check while this rename is in flight then
+      // renames straight over it. Measured, by removing just this lock and running
+      // Helm's own test again: 7 of 720 contended writes silently lost, versus 0 of
+      // 1440 with it (scripts/e2e/test-jot-concurrent-writes.mjs, 6 processes).
+      // See lock.mjs for what the lock does NOT cover - the Jot app and other
+      // machines do not take it.
+      let abort = null
+      const lock = acquireLock(filePath)
+      try {
+        abort = onBeforeRename()
+        if (!abort) {
+          fs.renameSync(temp, filePath)
+          return { ok: true }
+        }
+      } finally {
+        // Released before any backoff below, never held across a sleep: the hold
+        // is a hash read and a rename, so a waiter is never behind a wait.
+        releaseLock(lock)
+      }
+
+      // Refused. RETURN, do not retry: `contents` and whatever the hook compares
+      // against were both fixed by the caller before the first attempt, so every
+      // further attempt re-checks the same stale expectation against the same
+      // stale bytes and fails identically - four temp files written and deleted
+      // to reach a verdict already reached. The retry that can actually succeed
+      // is the caller re-READING and re-applying, which needs this answer, not
+      // three more copies of it.
+      //
+      // THIS LOOP ONCE ATE THAT RETRY. Helm's Jot bridge had its own outer loop -
+      // stat, read, mutate, write, and on a collision go round from the read - and
+      // the commit that centralised the atomic write here (2026-07-27) dropped it,
+      // because an attempt loop was visibly still present. It was the wrong one:
+      // retrying a write is not retrying a read, and only one of the two can
+      // resolve a concurrent edit. Five weeks of the guard refusing writes that a
+      // re-read would have absorbed, with the doc comment still describing the
+      // loop that had been deleted.
+      bestEffortRemove(temp)
+      return { ok: false, error: abort, aborted: true }
     } catch (error) {
       bestEffortRemove(temp)
 
@@ -181,7 +223,11 @@ export function writeFileAtomicSync(filePath, contents, { onBeforeRename, app } 
     }
   }
 
-  return { ok: false, error: lastError ?? 'the file kept changing during the write' }
+  // Unreachable: every path above either returns or continues, and the last
+  // attempt never continues. Kept so the function still answers with a result
+  // rather than `undefined` if that ever stops being true. It used to be the
+  // abort path's exit, which is why it used to say "the file kept changing".
+  return { ok: false, error: lastError ?? 'the write did not complete' }
 }
 
 /**

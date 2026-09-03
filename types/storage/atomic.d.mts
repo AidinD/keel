@@ -66,14 +66,20 @@ export declare function bestEffortRemove(temp: string): void;
  * a meaningful "the write did not happen" path and a throw is how these failures
  * got lost in the first place.
  *
+ * A returned `aborted: true` means the precondition hook refused: nothing was
+ * written, and the caller's own data is stale. That is a different answer from
+ * every other failure here, and the only one where trying again can help - see
+ * the note above the hook below.
+ *
  * @param {string} filePath
  * @param {string} contents
  * @param {object} [options]
  * @param {(() => string | null)} [options.onBeforeRename] Re-check preconditions
- *   immediately before the rename; return a reason to abort this attempt and
- *   retry. Helm's Jot bridge uses it for its concurrent-edit guard.
+ *   immediately before the rename; return a reason to refuse the write. Runs
+ *   under the write lock, together with the rename. Helm's Jot bridge uses it for
+ *   its concurrent-edit guard.
  * @param {string} [options.app] Name for the plain-language failure messages.
- * @returns {{ ok: true } | { ok: false, error: string }}
+ * @returns {{ ok: true } | { ok: false, error: string, aborted?: true }}
  */
 export declare function writeFileAtomicSync(filePath: string, contents: string, { onBeforeRename, app }?: {
     onBeforeRename?: (() => string | null);
@@ -83,6 +89,7 @@ export declare function writeFileAtomicSync(filePath: string, contents: string, 
 } | {
     ok: false;
     error: string;
+    aborted?: true;
 };
 /**
  * Pretty-printed JSON with a trailing newline, which is the common case.

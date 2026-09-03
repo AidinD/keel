@@ -12,7 +12,7 @@
  * and read a JSON file that something else may have touched. That is what is here,
  * and it is where all the incidents are.
  */
-export { MAX_ATTEMPTS, backoffMs, delay, isTransientLock, sleepSync } from './lock.mjs';
+export { MAX_ATTEMPTS, acquireLock, backoffMs, delay, isTransientLock, jitteredBackoffMs, lockPathFor, releaseLock, sleepSync } from './lock.mjs';
 export { bestEffortRemove, plainReason, tempPathFor, writeFileAtomic, writeFileAtomicSync, writeJsonAtomic, writeJsonAtomicSync } from './atomic.mjs';
 export { readJsonFile, stripBom } from './json.mjs';
 export { resolveDataDir } from './dataDir.mjs';

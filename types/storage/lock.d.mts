@@ -1,5 +1,7 @@
 /**
- * Telling "someone else has the file right now" apart from a real failure.
+ * Telling "someone else has the file right now" apart from a real failure - and,
+ * for a guarded write, keeping someone else out for the two operations that have
+ * to look like one.
  *
  * Every app in the suite keeps its data in a Dropbox-synced folder, so on Windows
  * the sync client holding a file mid-rename is not an edge case - it is the normal
@@ -56,3 +58,75 @@ export declare function sleepSync(ms: number): void;
  * @returns {Promise<void>}
  */
 export declare const delay: (ms: number) => Promise<void>;
+/**
+ * Jitter, for a retry that another writer is also retrying.
+ *
+ * The lock below serialises writers; it does not stop them from colliding again
+ * on the next attempt. Two writers that back off on the identical schedule stay
+ * in lockstep and keep losing to each other: the Jot skill's concurrency test
+ * measured about one write in 60 running out of attempts with a fixed backoff,
+ * and randomising the wait is what breaks the symmetry. Same base curve as
+ * `backoffMs`, spread over 50-150% of it.
+ *
+ * This is for a CALLER's read-modify-write retry, not for the lock waits inside
+ * this module - a lock wait is already short and already jittered.
+ *
+ * @param {number} attempt 0-based
+ * @returns {number} milliseconds
+ */
+export declare const jitteredBackoffMs: (attempt: number) => number;
+/**
+ * Where the lock for `filePath` lives.
+ *
+ * The name is a CROSS-PROCESS CONTRACT: two writers only exclude each other if
+ * they compute the same path for the same file. The Jot skill's standalone helper
+ * (`~/.claude/skills/jot-task-tracking/jot-edit.mjs`) reimplements this function
+ * because it has to run from any cwd with no package resolution - if you change
+ * the name or the hash here, change it there too, or the app and the scripts will
+ * each hold their own private lock and neither will know.
+ *
+ * Path-derived rather than random for the same reason, and lowercased because
+ * Windows paths are case-insensitive: `D:\x\todos.json` and `d:\X\todos.json` are
+ * one file and must be one lock.
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
+export declare function lockPathFor(filePath: string): string;
+/**
+ * Take the write lock for `filePath`, waiting out whoever holds it.
+ *
+ * THE MUTEX IS A DIRECTORY, NOT A FILE, and that is not a stylistic choice. The
+ * obvious version - create a lock file with the exclusive flag, unlink it on
+ * release - is broken on Windows. A file still has an open handle when the release
+ * unlinks it, so the deletion goes "pending", and another process's exclusive
+ * create then fails with EPERM rather than EEXIST. The Jot skill's first version
+ * read that EPERM as "no lock available here", quietly degraded to the content
+ * guard alone, and lost a write; its 6-writer stress run is the only reason that
+ * is known. `mkdir` is the classic portable mutex precisely because nothing holds
+ * a handle to a directory we never open, so its removal is immediate and the next
+ * writer sees a clean EEXIST-or-success.
+ *
+ * Returns a handle to pass to `releaseLock`. `lockPath: null` means the lock could
+ * not be used at all (no temp directory, read-only, out of space) and the caller
+ * is running on its content guard alone: degrading is better than refusing a write
+ * over a lock that is only ever a narrowing of an already-narrow window.
+ *
+ * Throws if the lock is still held after `LOCK_WAIT_MS`, which means another
+ * writer is stuck rather than busy. Callers turn that into "nothing was changed".
+ *
+ * @param {string} filePath
+ * @returns {{ lockPath: string | null }}
+ */
+export declare function acquireLock(filePath: string): {
+    lockPath: string | null;
+};
+/**
+ * Give the lock back. Never throws - a lock left behind is survivable, because the
+ * next writer takes it over as stale.
+ *
+ * @param {{ lockPath: string | null } | null} lock
+ */
+export declare function releaseLock(lock: {
+    lockPath: string | null;
+} | null): void;
