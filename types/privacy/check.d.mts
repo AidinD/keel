@@ -163,6 +163,65 @@ export declare function checkOutgoing({ cwd, extra }?: {
     }[];
 };
 /**
+ * Would putting this text into this repository publish something private?
+ *
+ * The push gate answers that question about a diff. This answers it about text that has not
+ * been written yet, and it exists because a push is not the only way content enters a
+ * repository: an application can generate a file and commit it on the user's behalf, and by
+ * the time the push gate sees it the content is already in local history and has to be
+ * rewritten out rather than simply not written.
+ *
+ * The case that prompted it: a session tool saves a handoff note into whichever repository the
+ * session is rooted in and commits it itself. Nobody reads it first, and it carries whatever
+ * the session was about. Refusing before the commit costs a warning; refusing at the push
+ * costs a history rewrite.
+ *
+ * Same visibility gate, same derived terms and the same pervasiveness split as the push gate,
+ * so a caller cannot end up with a second, softer definition of private.
+ *
+ * WHAT THE CALLER MUST DO WITH A REFUSAL: not commit. It must NOT also discard the text -
+ * saving is saving, and a note lost to a guard is a worse outcome than the one being
+ * prevented. Uncommitted content in a working tree has not been published.
+ *
+ * @param {object} args
+ * @param {string} args.text The content about to be committed.
+ * @param {string} [args.cwd] The repository it would be committed into.
+ * @param {string} [args.label] What to call it in the report, e.g. a filename.
+ * @param {string[]} [args.extra] Extra terms, as privateTerms takes them.
+ * @returns {{ checked: boolean, why: string, sources: string[], terms: number,
+ *   hits: { file: string, term: string, text: string, kind: "file" | "message" }[],
+ *   published: { file: string, term: string, text: string, kind: "file" | "message" }[],
+ *   pervasive: { term: string, count: number, files: number }[] }}
+ */
+export declare function checkText({ text, cwd, label, extra }: {
+    text: string;
+    cwd?: string;
+    label?: string;
+    extra?: string[];
+}): {
+    checked: boolean;
+    why: string;
+    sources: string[];
+    terms: number;
+    hits: {
+        file: string;
+        term: string;
+        text: string;
+        kind: "file" | "message";
+    }[];
+    published: {
+        file: string;
+        term: string;
+        text: string;
+        kind: "file" | "message";
+    }[];
+    pervasive: {
+        term: string;
+        count: number;
+        files: number;
+    }[];
+};
+/**
  * Split hits into what this gate can still do something about, and what the repository
  * already publishes in force.
  *

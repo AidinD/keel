@@ -9,4 +9,4 @@
  */
 
 export { MIN_TERM, findTerms, privateTerms } from "./terms.mjs";
-export { addedLines, alreadyInRepo, checkOutgoing, partitionHits, isPublic, outgoingDiff, outgoingMessages, parseMessages, report, PERVASIVE_MIN_FILES, PERVASIVE_MIN_HITS } from "./check.mjs";
+export { addedLines, alreadyInRepo, checkOutgoing, checkText, partitionHits, isPublic, outgoingDiff, outgoingMessages, parseMessages, report, PERVASIVE_MIN_FILES, PERVASIVE_MIN_HITS } from "./check.mjs";

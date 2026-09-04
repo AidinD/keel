@@ -13,6 +13,7 @@ import {
   PERVASIVE_MIN_HITS,
   addedLines,
   alreadyInRepo,
+  checkText,
   findTerms,
   outgoingMessages,
   parseMessages,
@@ -211,6 +212,77 @@ test('a hyphenated subject is found even when a file extension follows it', () =
   assert.deepEqual(findTerms('const row_meta = 1', ['Meta']), [])
   assert.deepEqual(findTerms('.row-meta { color: red }', ['Meta']), [])
   assert.deepEqual(findTerms('const metadata = compute()', ['Meta']), [])
+})
+
+test('text can be checked BEFORE it is committed, not only before it is pushed', () => {
+  /*
+   * A push is not the only way content enters a repository. An application can generate a file
+   * and commit it on the user's behalf - a session tool that saves a handoff note into whichever
+   * repository the session is rooted in, and commits it itself, was the case that prompted this.
+   * By the time the push gate sees such a file the content is already in local history, so the
+   * fix is a rewrite rather than simply not writing it.
+   *
+   * Refusing before the commit costs a warning. Refusing at the push costs a history rewrite.
+   */
+  const dir = mkdtempSync(join(tmpdir(), 'keel-checktext-'))
+  try {
+    mkdirSync(join(dir, 'repo'), { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: join(dir, 'repo') })
+    mkdirSync(join(dir, 'meta', '.helm', 'handoffs'), { recursive: true })
+    writeFileSync(join(dir, 'meta', '.helm', 'handoffs', 'model-trains.md'), 'notes')
+
+    process.env.HELM_META_HOME = join(dir, 'meta')
+    process.env.TEND_DATA_DIR = join(dir, 'no-tend')
+    process.env.NIB_DATA_DIR = join(dir, 'no-nib')
+
+    const bad = checkText({
+      text: 'picked up where the model-trains session left off',
+      cwd: join(dir, 'repo'),
+      label: 'HANDOFF.md'
+    })
+    assert.equal(bad.checked, true, 'a repository whose visibility cannot be read is treated as public')
+    assert.equal(bad.hits.length, 1, `the private subject is found in text that has not been written yet (${JSON.stringify(bad.hits)})`)
+    assert.equal(bad.hits[0].term, 'model-trains')
+    assert.equal(bad.hits[0].file, 'HANDOFF.md', 'and the caller can say WHICH file it refused, not just that it refused')
+
+    const fine = checkText({
+      text: 'reconciled the stale records and wrote the test',
+      cwd: join(dir, 'repo'),
+      label: 'HANDOFF.md'
+    })
+    assert.equal(fine.checked, true)
+    assert.deepEqual(fine.hits, [], 'ordinary content is not refused - a guard that blocks everything is turned off')
+  } finally {
+    delete process.env.HELM_META_HOME
+    delete process.env.TEND_DATA_DIR
+    delete process.env.NIB_DATA_DIR
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('checkText says it did NOT check rather than reporting a clean result it cannot back', () => {
+  /*
+   * The difference between "nothing private in this" and "I could not read the private data"
+   * is the whole value of the report. Collapsing them into an empty hit list is how a guard
+   * that has quietly stopped working goes on being trusted for months.
+   */
+  const dir = mkdtempSync(join(tmpdir(), 'keel-checktext-blind-'))
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir })
+    process.env.HELM_META_HOME = join(dir, 'nothing')
+    process.env.TEND_DATA_DIR = join(dir, 'nothing')
+    process.env.NIB_DATA_DIR = join(dir, 'nothing')
+
+    const blind = checkText({ text: 'anything at all', cwd: dir })
+    assert.equal(blind.checked, false, 'with no private data readable it reports that it did not check')
+    assert.match(blind.why, /nothing to compare against/, `and says why in words (${blind.why})`)
+    assert.deepEqual(blind.hits, [], 'and finds nothing, which on its own would have looked like a pass')
+  } finally {
+    delete process.env.HELM_META_HOME
+    delete process.env.TEND_DATA_DIR
+    delete process.env.NIB_DATA_DIR
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('a malformed line is skipped rather than taking the whole check down', () => {
