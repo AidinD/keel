@@ -137,7 +137,7 @@ test('a private SUBJECT is a term too, not only a private name', () => {
   const dir = mkdtempSync(join(tmpdir(), 'keel-privacy-topics-'))
   try {
     mkdirSync(join(dir, '.helm', 'handoffs', 'superseded'), { recursive: true })
-    writeFileSync(join(dir, '.helm', 'handoffs', 'strength-training.md'), '# notes\n')
+    writeFileSync(join(dir, '.helm', 'handoffs', 'model-trains.md'), '# notes\n')
     writeFileSync(join(dir, '.helm', 'handoffs', 'bikupor.md'), '# notes\n')
     writeFileSync(join(dir, '.helm', 'handoffs', 'notes.md'), '# vocabulary, not a subject\n')
     writeFileSync(join(dir, '.helm', 'handoffs', 'not-a-handoff.txt'), 'ignored\n')
@@ -148,21 +148,21 @@ test('a private SUBJECT is a term too, not only a private name', () => {
 
     const { terms, sources } = privateTerms()
 
-    assert.ok(terms.includes('strength-training'), 'a filed subject is a term')
+    assert.ok(terms.includes('model-trains'), 'a filed subject is a term')
     assert.ok(terms.includes('bikupor'), 'a single-word subject counts as well')
     assert.ok(!terms.includes('not-a-handoff'), 'only the markdown files are subjects')
     assert.ok(!terms.includes('notes'), "and the apps' own vocabulary is still not a leak")
 
     /*
      * The one that matters most, and the reason this source is kept whole.
-     * Splitting `strength-training` into words contributes `training`, which
+     * Splitting `model-trains` into words contributes `model`, which
      * appears in ordinary prose and in identifiers - the same mistake this
      * module already made once with Nib folder names, where reading every word
      * produced 284 hits in one repository and not one of them was a leak. A
      * guard that cries wolf is bypassed within a week.
      */
     assert.ok(
-      !terms.some((t) => t.toLowerCase() === 'training' || t.toLowerCase() === 'strength'),
+      !terms.some((t) => t.toLowerCase() === 'trains' || t.toLowerCase() === 'model'),
       'a subject is NOT split into words, or an ordinary word would flood every scan'
     )
     assert.ok(
@@ -192,18 +192,18 @@ test('a hyphenated subject is found even when a file extension follows it', () =
    * leak. Both directions are asserted here, because relaxing it too far brings
    * back the 44-hits-none-of-them-a-leak result that motivated it.
    */
-  const subject = ['strength-training']
+  const subject = ['model-trains']
   assert.equal(
-    findTerms('writeFileSync(join(d, "handoffs", "strength-training.md"), x)', subject).length,
+    findTerms('writeFileSync(join(d, "handoffs", "model-trains.md"), x)', subject).length,
     1,
     'the real leaked line is flagged - a slug followed by .md'
   )
   assert.equal(
-    findTerms('the strength-training-log variant', subject).length,
+    findTerms('the model-trains-log variant', subject).length,
     1,
     'and so is a variant of the same subject'
   )
-  assert.equal(findTerms('a note about strength-training.', subject).length, 1, 'and one at the end of a sentence')
+  assert.equal(findTerms('a note about model-trains.', subject).length, 1, 'and one at the end of a sentence')
 
   // And the single-word protection is untouched - each of these cost a real
   // false-positive storm before the boundary rule existed.

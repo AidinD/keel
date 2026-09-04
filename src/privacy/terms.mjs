@@ -254,7 +254,7 @@ function nibNames(dir) {
  *
  * This is the one source whose values must not go through the word split, and
  * the reason is the mistake this module already made once with Nib: a slug like
- * `strength-training` splits into `training`, which appears in ordinary prose
+ * `model-trains` splits into `model`, which appears in ordinary prose
  * and in identifiers, and a guard that cries wolf is bypassed within a week. A
  * hyphenated slug is specific enough to mean something on its own; its
  * individual words are not.
