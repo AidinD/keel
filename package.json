@@ -53,7 +53,7 @@
   ],
   "scripts": {
     "audit:privacy": "node scripts/audit-private-terms.mjs",
-    "prepare": "git config core.hooksPath .githooks",
+    "prepare": "git config core.hooksPath .githooks || exit 0",
     "test": "node --test \"test/**/*.test.mjs\"",
     "types": "tsc"
   },
